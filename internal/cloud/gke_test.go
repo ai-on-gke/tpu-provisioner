@@ -514,6 +514,71 @@ func TestNodePoolForPod(t *testing.T) {
 			},
 		},
 		{
+			desc: "2x2 topology should have no placement policy",
+			pod: podBuild{
+				selector: map[string]string{
+					"cloud.google.com/gke-tpu-accelerator": "tpu-v6e-slice",
+					"cloud.google.com/gke-tpu-topology":    "2x2",
+				},
+				tpuResource: "4",
+			},
+			want: &container.NodePool{
+				Config: &container.NodeConfig{
+					Labels: map[string]string{
+						"google.com/nodepool-manager":                 "tpu-provisioner",
+						"google.com/tpu-provisioner-jobset-name":      "jobset-test",
+						"google.com/tpu-provisioner-jobset-namespace": "default",
+						"google.com/tpu-provisioner-parent-kind":      "job",
+						"google.com/tpu-provisioner-parent-name":      "jobset-test-job-1-0",
+						"google.com/tpu-provisioner-parent-namespace": "default",
+					},
+					MachineType:            "ct6e-standard-4t",
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+				},
+				InitialNodeCount:  1,
+				Locations:         []string{""},
+				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 15},
+				PlacementPolicy:   &container.PlacementPolicy{},
+				Name:              "jobset-test-rando",
+				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
+			},
+		},
+		{
+			desc: "4x4 topology should have placement policy",
+			pod: podBuild{
+				selector: map[string]string{
+					"cloud.google.com/gke-tpu-accelerator": "tpu-v6e-slice",
+					"cloud.google.com/gke-tpu-topology":    "4x4",
+				},
+				tpuResource: "16",
+			},
+			want: &container.NodePool{
+				Config: &container.NodeConfig{
+					Labels: map[string]string{
+						"google.com/nodepool-manager":                 "tpu-provisioner",
+						"google.com/tpu-provisioner-jobset-name":      "jobset-test",
+						"google.com/tpu-provisioner-jobset-namespace": "default",
+						"google.com/tpu-provisioner-parent-kind":      "job",
+						"google.com/tpu-provisioner-parent-name":      "jobset-test-job-1-0",
+						"google.com/tpu-provisioner-parent-namespace": "default",
+					},
+					MachineType:            "ct6e-standard-16t",
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+				},
+				InitialNodeCount:  4,
+				Locations:         []string{""},
+				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 15},
+				PlacementPolicy: &container.PlacementPolicy{
+					TpuTopology: "4x4",
+					Type:        "COMPACT",
+				},
+				Name:            "jobset-test-rando",
+				UpgradeSettings: &container.UpgradeSettings{MaxSurge: 1},
+			},
+		},
+		{
 			desc: "spot",
 			pod: podBuild{
 				additionalSelector: map[string]string{
