@@ -237,6 +237,23 @@ func Test_tpuTopologyToNodeCount(t *testing.T) {
 			count: 1,
 		},
 		{
+			accel: "tpu-v6e-slice",
+			topo:  "2x2",
+			count: 1,
+		},
+		// Note: There is a possible configuraiton where 2x4 is attached to 1
+		// VMs, however this is not being taken into account by tpuTopologyToNodeCount.
+		{
+			accel: "tpu-v6e-slice",
+			topo:  "2x4",
+			count: 2,
+		},
+		{
+			accel: "tpu-v6e-slice",
+			topo:  "4x4",
+			count: 4,
+		},
+		{
 			accel: "not-an-accel",
 			topo:  "2x4",
 			err:   true,
@@ -342,6 +359,11 @@ func Test_tpuMachineType(t *testing.T) {
 			accel:       "tpu-v5p-slice",
 			tpuRequest:  4,
 			machineType: "ct5p-hightpu-4t",
+		},
+		{
+			accel:       "tpu-v6e-slice",
+			tpuRequest:  4,
+			machineType: "ct6e-standard-4t",
 		},
 		{
 			accel:      "not-an-accel",
