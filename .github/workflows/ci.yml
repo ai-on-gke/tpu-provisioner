@@ -1,0 +1,16 @@
+name: Unit tests
+
+on: [pull_request]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Run build target
+      run: make build
+
+    - name: Run test target
+      run: make test
