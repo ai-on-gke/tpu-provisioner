@@ -6,6 +6,12 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
+const (
+	topologyAnnotation  = "cloud.google.com/gke-tpu-topology"
+	acceleratorSelector = "cloud.google.com/gke-tpu-accelerator"
+	v7xAccelerator      = "tpu-v7x"
+)
+
 func isPending(p *corev1.Pod) bool {
 	return p.Status.Phase == corev1.PodPending
 }
@@ -66,4 +72,37 @@ func isLeaderPod(pod *corev1.Pod) bool {
 // set as a label or annotation. Otherwise, it returns false.
 func autoProvisioningDisabled(pod *corev1.Pod) bool {
 	return pod.Labels[DisableAutoProvisioningLabel] == "true" || pod.Annotations[DisableAutoProvisioningLabel] == "true"
+}
+
+// autoProvisioningDisabledForJobSet returns true if the JobSet or Pod spec has
+// "tpu-provisioner.cloud.google.com/disable-autoprovisioning=true"
+// set as a label or annotation. Otherwise, it returns false.
+func autoProvisioningDisabledForJobSet(js *jobset.JobSet) bool {
+	if js.Labels[DisableAutoProvisioningLabel] == "true" || js.Annotations[DisableAutoProvisioningLabel] == "true" {
+		return true
+	}
+	// Historically, auto provisioning was disabled via the Pod metadata. Keep the same logic.
+	for _, rj := range js.Spec.ReplicatedJobs {
+		if podLabels := rj.Template.Spec.Template.Labels; podLabels != nil && podLabels[DisableAutoProvisioningLabel] == "true" {
+			return true
+		}
+		if podAnn := rj.Template.Spec.Template.Annotations; podAnn != nil && podAnn[DisableAutoProvisioningLabel] == "true" {
+			return true
+		}
+	}
+	return false
+}
+
+func acceleratorsForJobSet(js *jobset.JobSet) map[string]bool {
+	acc := map[string]bool{}
+
+	for _, rj := range js.Spec.ReplicatedJobs {
+		if sel := rj.Template.Spec.Template.Spec.NodeSelector; sel != nil {
+			if val, ok := sel[acceleratorSelector]; ok {
+				acc[val] = true
+			}
+		}
+	}
+
+	return acc
 }

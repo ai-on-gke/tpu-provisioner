@@ -46,6 +46,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -58,11 +59,15 @@ import (
 )
 
 var (
-	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	scheme                = runtime.NewScheme()
+	setupLog              = ctrl.Log.WithName("setup")
+	enableSliceController = os.Getenv("ENABLE_SLICE_CONTROLLER") == "true"
 )
 
 func init() {
+	if enableSliceController {
+		utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	}
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
@@ -235,6 +240,16 @@ func main() {
 	default:
 		setupLog.Error(err, "unrecognized provider", "provider", p)
 		os.Exit(1)
+	}
+
+	if enableSliceController {
+		if err := (&controller.SliceReconciler{
+			Client:   mgr.GetClient(),
+			Recorder: mgr.GetEventRecorderFor("tpu-provisioner"),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "SliceReconciler")
+			os.Exit(1)
+		}
 	}
 
 	if err := (&controller.CreationReconciler{
