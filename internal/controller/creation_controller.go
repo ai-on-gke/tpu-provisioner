@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
 // When this pod label is set to "true", the TPU provisioner will not reconcile the pod.
@@ -71,6 +73,24 @@ func (r *CreationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("getting pod: %w", err)
+	}
+
+	// NOTE: Reconcile() is already filtered down to Pods that decend from JobSets
+	jobSetName := jobSetForPod(&pod)
+	var js jobset.JobSet
+	if err := r.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: jobSetName}, &js); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Requeue with a delay in case the JobSet cache is not up to date with the Pod cache.
+			return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("getting jobset %s/%s for pod %s/%s: %w",
+			js.Namespace, js.Name,
+			pod.Namespace, pod.Name,
+			err)
+	}
+	if sliceProvisioningEnabled(&js) {
+		lg.Info("ignoring nodepool autoprovisioning since slice provisioning is enabled", "label", SliceProvisioningLabel)
+		return ctrl.Result{}, nil
 	}
 
 	lg.Info("Ensuring node pool for unschedulable pod")

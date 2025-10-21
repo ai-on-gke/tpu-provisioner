@@ -7,17 +7,22 @@ import (
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
+const SliceProvisioningLabel = "tpu-provisioner.cloud.google.com/slice-autoprovisioning"
+
 type SliceReconciler struct {
 	client.Client
 	Recorder record.EventRecorder
+	Scheme   *runtime.Scheme
 }
 
 func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -47,11 +52,16 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("getting slice: %w", err)
+			return ctrl.Result{}, fmt.Errorf("getting slice %s/%s: %w", slice.Namespace, slice.Name, err)
 		}
+
+		if err := controllerutil.SetControllerReference(&js, &slice, r.Scheme); err != nil {
+			return ctrl.Result{}, fmt.Errorf("setting controller reference on slice %s/%s: %w", slice.Namespace, slice.Name, err)
+		}
+
 		// Does not exist - create.
 		if err := r.Create(ctx, &slice); err != nil {
-			return ctrl.Result{}, fmt.Errorf("creating slice: %w", err)
+			return ctrl.Result{}, fmt.Errorf("creating slice %s/%s: %w", slice.Namespace, slice.Name, err)
 		}
 	}
 
@@ -64,6 +74,7 @@ func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
 			js, ok := object.(*jobset.JobSet)
 			return ok &&
+				sliceProvisioningEnabled(js) &&
 				!autoProvisioningDisabledForJobSet(js) &&
 				acceleratorsForJobSet(js)[v7xAccelerator]
 		})).

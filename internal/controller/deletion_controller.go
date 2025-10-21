@@ -125,6 +125,10 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if jobSetCompleted(&js) || jobSetFailed(&js) {
 		return r.deleteNodePool(ctx, &node, fmt.Sprintf("JobSet %s execution has ended (completed or failed)", jobSetName))
 	}
+	if sliceProvisioningEnabled(&js) {
+		lg.Info("ignoring nodepool autoprovisioning since slice provisioning is enabled", "label", SliceProvisioningLabel)
+		return ctrl.Result{}, nil
+	}
 
 	// No need to check all the other nodes, which will have the same jobset name label, we can end
 	// the loop early.

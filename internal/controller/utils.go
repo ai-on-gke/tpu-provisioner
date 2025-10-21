@@ -61,6 +61,11 @@ func partOfJobSet(pod *corev1.Pod) bool {
 	return pod.Annotations[jobset.JobSetNameKey] != ""
 }
 
+// jobSetForPod returns the JobSet Name that is 2 layers up from the Pod.
+func jobSetForPod(pod *corev1.Pod) string {
+	return pod.Annotations[jobset.JobSetNameKey]
+}
+
 // isLeaderPod returns true if the given pod is a leader pod (job completion index of 0),
 // otherwise it returns false.
 func isLeaderPod(pod *corev1.Pod) bool {
@@ -105,4 +110,8 @@ func acceleratorsForJobSet(js *jobset.JobSet) map[string]bool {
 	}
 
 	return acc
+}
+
+func sliceProvisioningEnabled(js *jobset.JobSet) bool {
+	return js.Annotations != nil && js.Annotations[SliceProvisioningLabel] == "true"
 }
