@@ -165,3 +165,8 @@ Test that you can apply a TPU Job.
 ```bash
 kubectl apply -f ./examples/v4-2x2x4/
 ```
+
+
+### Ironwood / tpu7x support
+
+In order to support ironwood we need to have Workload Policy's attached to nodepool creation step, in order to work with the tpu-provisioner you will need Workload Policy resources in the project and region with the following syntax: `tpu-provisioner-$TPU_TOPOLOGY`, e.g. `tpu-provisioner-2x2x2` or `tpu-provisioner-8x8x16`. See the script in [./docs/ironwood-policy-bootstrap.sh](./docs/ironwood-policy-bootstrap.sh), which would need to run ahead of time in the project for each region where ironwood capacity is landing. 

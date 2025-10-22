@@ -466,11 +466,17 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 		nodeServiceAccount = sa
 	}
 
-	// placement policy is only valid in GKE for non "1t" shapes
 	placementPolicy := &containerv1beta1.PlacementPolicy{}
-	if nodeCount != 1 {
-		placementPolicy.TpuTopology = tpuTopo
-		placementPolicy.Type = "COMPACT"
+
+	if accel == V7xSliceAccelerator {
+		// TPU v7x slices must use workload policy
+		placementPolicy.PolicyName = fmt.Sprintf("tpu-provisioner-%v", tpuTopo)
+	} else {
+		// For non-v7x, placement policies are only used for multi-host topologies
+		if nodeCount != 1 {
+			placementPolicy.TpuTopology = tpuTopo
+			placementPolicy.Type = "COMPACT"
+		}
 	}
 
 	var diskType string
