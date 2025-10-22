@@ -36,6 +36,7 @@ import (
 
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
 	//+kubebuilder:scaffold:imports
 )
@@ -91,6 +92,9 @@ var _ = BeforeSuite(func() {
 	err = jobset.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = v1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	//+kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -122,6 +126,13 @@ var _ = BeforeSuite(func() {
 			MinLifetime:       minNodeLifetime,
 			PoolDeletionDelay: nodepoolDeletionDelay,
 		},
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
+	err = (&controller.SliceReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("slice-reconciler"),
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
