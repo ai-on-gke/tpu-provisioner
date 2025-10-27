@@ -241,8 +241,6 @@ func Test_tpuTopologyToNodeCount(t *testing.T) {
 			topo:  "2x2",
 			count: 1,
 		},
-		// Note: There is a 2x4 topology which uses 2 VMs,
-		// however this is not being taken into account by tpuTopologyToNodeCount.
 		{
 			accel: "tpu-v6e-slice",
 			topo:  "2x4",
