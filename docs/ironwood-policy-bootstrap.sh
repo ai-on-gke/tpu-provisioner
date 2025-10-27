@@ -123,10 +123,8 @@ supported_topologies=(
 )
 
 for topology in "${supported_topologies[@]}"; do
-  # Create a name for the policy by replacing 'x' with '-'
-  # e.g., '12x12x12' becomes '12-12-12'
-  shape_name="${topology//x/-}"
-  workload_policy_name="tpu-provisioner-${shape_name}"
+  # creates a workload policy for each topology
+  workload_policy_name="tpu-provisioner-${topology}"
 
   echo "Creating resource policy '${workload_policy_name}' for topology '${topology}'..."
 
