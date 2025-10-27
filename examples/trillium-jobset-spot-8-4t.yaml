@@ -1,7 +1,7 @@
 apiVersion: jobset.x-k8s.io/v1alpha2
 kind: JobSet
 metadata:
-  name: ironwood-jobset-spot
+  name: test-v6e-8-4t-jobset
   annotations:
     alpha.jobset.sigs.k8s.io/exclusive-topology: cloud.google.com/gke-nodepool # 1:1 job replica to node pool assignment
 spec:
@@ -11,19 +11,20 @@ spec:
   - name: workers
     replicas: 1 # set to number of node pools
     template:
-      spec:
+      spec: 
         backoffLimit: 0
         # completions and parallelism should be the number of cores divided by 8
         # (e.g. 4 for a v4-32)
-        completions: 2
-        parallelism: 2
+        completions: 1
+        parallelism: 1
         template:
           spec:
             restartPolicy: Never
             nodeSelector:
-              cloud.google.com/gke-tpu-accelerator: tpu7x
-              cloud.google.com/gke-tpu-topology: 2x2x2
+              cloud.google.com/gke-tpu-accelerator: tpu-v6e-slice
+              cloud.google.com/gke-tpu-topology: 2x4
               cloud.google.com/gke-spot: "true"
+              abc: xyz
             tolerations:
             - key: cloud.google.com/gke-spot
               operator: Equal
@@ -32,7 +33,7 @@ spec:
             containers:
             - name: tpu-job
               image: python:3.8
-              ports:
+              ports: 
               - containerPort: 8471 # Default port using which TPU VMs communicate
               securityContext:
                 privileged: true
