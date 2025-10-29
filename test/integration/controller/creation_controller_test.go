@@ -46,6 +46,11 @@ var _ = Describe("Creation controller", func() {
 				Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
 			}()
 
+			// Create JobSet for Pod.
+			testJS := makeJobSet("test-js")
+			testJS.Namespace = ns.Name
+			Expect(k8sClient.Create(ctx, testJS)).To(Succeed())
+
 			// Create pod in test namespace.
 			pod := tc.pod
 			pod.Namespace = ns.Name
