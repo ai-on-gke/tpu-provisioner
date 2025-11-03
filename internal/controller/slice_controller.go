@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
@@ -17,7 +18,21 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
+const cubeSelectionLabel = "cloud.google.com/gke-nodepool"
+
 const SliceProvisioningLabel = "tpu-provisioner.cloud.google.com/slice-autoprovisioning"
+
+/*
+Example value:
+
+	{
+	  "replicated_job_name": [
+	    ["cube-1", "cube-2"], # Replica 0
+		["cube-3", "cube-4"]  # Replica 1
+	  ]
+	}
+*/
+const SliceSelectionAnnotation = "tpu-provisioner.cloud.google.com/slice-selection"
 
 type SliceReconciler struct {
 	client.Client
@@ -39,7 +54,11 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, fmt.Errorf("getting jobset: %w", err)
 	}
 
-	slices := jobsetSlices(&js)
+	slices, err := jobsetSlices(&js)
+	if err != nil {
+		lg.Error(err, "Error converting JobSet to Slices")
+		return ctrl.Result{}, nil
+	}
 
 	for _, slice := range slices {
 		err := r.Get(ctx, req.NamespacedName, &v1alpha1.Slice{
@@ -82,8 +101,13 @@ func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func jobsetSlices(js *jobset.JobSet) []v1alpha1.Slice {
+func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
 	var slices []v1alpha1.Slice
+
+	sliceSelection, err := parseSliceSelection(js)
+	if err != nil {
+		return nil, fmt.Errorf("parsing slice selection: %w", err)
+	}
 
 	for _, rj := range js.Spec.ReplicatedJobs {
 		podNodeSelector := rj.Template.Spec.Template.Spec.NodeSelector
@@ -103,6 +127,7 @@ func jobsetSlices(js *jobset.JobSet) []v1alpha1.Slice {
 			continue
 		}
 
+		cubeSelection := sliceSelection[rj.Name]
 		for i := 0; i < int(rj.Replicas); i++ {
 			s := v1alpha1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
@@ -114,23 +139,46 @@ func jobsetSlices(js *jobset.JobSet) []v1alpha1.Slice {
 					AcceleratorType: accel,
 					// TODO: check that this is the correct topology value to use.
 					AcceleratorTopology: topo,
-					// NodeSelector is a required field, should that be changed?
-					NodeSelector: map[string][]string{},
 				},
+			}
+			if len(cubeSelection) >= i+1 {
+				s.Spec.NodeSelector = map[string][]string{
+					cubeSelectionLabel: cubeSelection[i],
+				}
+			} else {
+				// NodeSelector is a required field, should that be changed?
+				s.Spec.NodeSelector = map[string][]string{}
 			}
 			slices = append(slices, s)
 		}
 	}
 
-	return slices
+	return slices, nil
+}
+
+// parseSliceSelection returns a map["replicated_job_name"][replicated_job_index]["cube", "cube"]
+// from the parsed annotation.
+// returns an empty map if there is no annotation.
+func parseSliceSelection(js *jobset.JobSet) (map[string][][]string, error) {
+	var sliceSelection map[string][][]string
+	if js.Annotations != nil {
+		selectionJSON, ok := js.Annotations[SliceSelectionAnnotation]
+		if ok {
+			if err := json.Unmarshal([]byte(selectionJSON), &sliceSelection); err != nil {
+				return nil, fmt.Errorf(`slice selection should be of the format {"replicated_job_name": [["cube-1","cube-2"],["cube-3","cube-4"]]}: %w`, err)
+			}
+			return sliceSelection, nil
+		}
+	}
+	return make(map[string][][]string), nil
 }
 
 // sliceName formats a name for a Slice using the following pattern:
-// {jobset_name[:34]}-{jobset_uid[:8]}-{replicated_job_name[:20]}-{replicated_job_replica}
-// which should result in a max of 3 + 34 + 1 + 8 + 1 + 10 + 1 + 2 = 60 chars.
+// {jobset_name[:32]}-{jobset_uid[:8]}-{replicated_job_name[:10]}-{replicated_job_replica}
+// which should result in a max of 3 + 32 + 1 + 8 + 1 + 10 + 1 + 2 = 58 chars.
 func sliceName(js *jobset.JobSet, replicatedJobName string, replicatedJobReplica int) string {
 	return fmt.Sprintf("js-%s-%s-%s-%d",
-		js.Name[:min(34, len(js.Name))],
+		js.Name[:min(32, len(js.Name))],
 		js.UID[:8],
 		replicatedJobName[:min(10, len(replicatedJobName))],
 		replicatedJobReplica,
