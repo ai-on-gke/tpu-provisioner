@@ -152,7 +152,7 @@ var _ = Describe("Slice controller", func() {
 		Entry("JobSet with slice-selection annotation should create Slices with NodeSelector", &testCase{
 			jobSet: constructJobSet("test-js-7",
 				withAnnotation(controller.SliceProvisioningLabel, "true"),
-				withAnnotation("tpu-provisioner.cloud.google.com/slice-selection", `{"worker":[["cube-1","cube-2"],["cube-3","cube-4"]]}`),
+				withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-1","cube-2"],["cube-3","cube-4"]]}`),
 				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu-v7x", "2x2x4")),
 			),
 			wantSliceCreation: true,
@@ -179,7 +179,7 @@ var _ = Describe("Slice controller", func() {
 				},
 			},
 		}),
-		1)
+	)
 })
 
 // JobSetOption is a function that modifies a JobSet.
