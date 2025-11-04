@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -132,7 +133,7 @@ func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
 			s := v1alpha1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: js.Namespace,
-					Name:      sliceName(js, rj.Name, i),
+					Name:      utils.SliceName(js.Name, string(js.UID), rj.Name, i),
 				},
 				Spec: v1alpha1.SliceSpec{
 					// TODO: Check that this is the correct accelerator value to use.
@@ -171,16 +172,4 @@ func parseSliceSelection(js *jobset.JobSet) (map[string][][]string, error) {
 		}
 	}
 	return make(map[string][][]string), nil
-}
-
-// sliceName formats a name for a Slice using the following pattern:
-// {jobset_name[:32]}-{jobset_uid[:8]}-{replicated_job_name[:10]}-{replicated_job_replica}
-// which should result in a max of 3 + 32 + 1 + 8 + 1 + 10 + 1 + 2 = 58 chars.
-func sliceName(js *jobset.JobSet, replicatedJobName string, replicatedJobReplica int) string {
-	return fmt.Sprintf("js-%s-%s-%s-%d",
-		js.Name[:min(32, len(js.Name))],
-		js.UID[:8],
-		replicatedJobName[:min(10, len(replicatedJobName))],
-		replicatedJobReplica,
-	)
 }
