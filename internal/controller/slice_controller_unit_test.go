@@ -45,7 +45,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -62,7 +62,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-0",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector:        map[string][]string{},
 					},
@@ -93,7 +93,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -110,7 +110,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-0",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector:        map[string][]string{},
 					},
@@ -121,7 +121,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-1",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector:        map[string][]string{},
 					},
@@ -132,7 +132,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-2",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector:        map[string][]string{},
 					},
@@ -163,7 +163,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -183,7 +183,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -200,7 +200,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-1-0",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector:        map[string][]string{},
 					},
@@ -211,7 +211,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-1-1",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector:        map[string][]string{},
 					},
@@ -222,7 +222,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-2-0",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x2",
 						NodeSelector:        map[string][]string{},
 					},
@@ -333,7 +333,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -367,7 +367,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -406,7 +406,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -423,7 +423,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-0",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector: map[string][]string{
 							cubeSelectionLabel: {"cube-1", "cube-2"},
@@ -436,7 +436,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-1",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector: map[string][]string{
 							cubeSelectionLabel: {"cube-3", "cube-4"},
@@ -472,7 +472,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -512,7 +512,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -529,7 +529,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-0",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector: map[string][]string{
 							cubeSelectionLabel: {"cube-1", "cube-2"},
@@ -542,7 +542,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-worker-1",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector:        map[string][]string{},
 					},
@@ -573,7 +573,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -590,7 +590,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-this-is-a-very-long-jobset-name--test-uid-long-repli-0",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector:        map[string][]string{},
 					},
@@ -621,7 +621,7 @@ func TestJobsetSlices(t *testing.T) {
 										},
 										Spec: corev1.PodSpec{
 											NodeSelector: map[string]string{
-												acceleratorSelector: v7xAccelerator,
+												acceleratorSelector: tpu7xAccelerator,
 											},
 										},
 									},
@@ -658,7 +658,7 @@ func TestJobsetSlices(t *testing.T) {
 						Name:      "js-test-jobset-test-uid-v7x-worker-0",
 					},
 					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     v7xAccelerator,
+						AcceleratorType:     tpu7xAccelerator,
 						AcceleratorTopology: "2x2x4",
 						NodeSelector:        map[string][]string{},
 					},

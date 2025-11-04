@@ -96,7 +96,7 @@ func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return ok &&
 				sliceProvisioningEnabled(js) &&
 				!autoProvisioningDisabledForJobSet(js) &&
-				acceleratorsForJobSet(js)[v7xAccelerator]
+				acceleratorsForJobSet(js)[tpu7xAccelerator]
 		})).
 		Owns(&v1alpha1.Slice{}).
 		Complete(r)
@@ -116,7 +116,7 @@ func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
 			continue
 		}
 		accel := podNodeSelector[acceleratorSelector]
-		if accel != v7xAccelerator {
+		if accel != tpu7xAccelerator {
 			continue
 		}
 		podAnnotations := rj.Template.Spec.Template.Annotations

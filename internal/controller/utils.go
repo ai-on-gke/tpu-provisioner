@@ -9,7 +9,7 @@ import (
 const (
 	topologyAnnotation  = "cloud.google.com/gke-tpu-topology"
 	acceleratorSelector = "cloud.google.com/gke-tpu-accelerator"
-	v7xAccelerator      = "tpu-v7x"
+	tpu7xAccelerator    = "tpu7x"
 )
 
 func isPending(p *corev1.Pod) bool {
