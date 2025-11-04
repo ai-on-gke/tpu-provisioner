@@ -60,6 +60,6 @@ metadata:
 spec:
   secretName: webhook-server-tls
   dnsNames:
-  - webhook-server.tpu-provisioner-system.svc
+  - tpu-provisioner-webhook-server.tpu-provisioner-system.svc
   issuerRef:
     name: tpu-provisioner-webhook-server
