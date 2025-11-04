@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tpu-provisioner-manager
+  namespace: tpu-provisioner-system
+data:
+  ENABLE_SLICE_CONTROLLER: "true"
