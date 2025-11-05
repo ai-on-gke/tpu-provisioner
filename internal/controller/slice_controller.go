@@ -93,10 +93,13 @@ func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&jobset.JobSet{}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
 			js, ok := object.(*jobset.JobSet)
-			return ok &&
-				sliceProvisioningEnabled(js) &&
+			if !ok {
+				return false
+			}
+			accels := acceleratorsForJobSet(js)
+			return sliceProvisioningEnabled(js) &&
 				!autoProvisioningDisabledForJobSet(js) &&
-				acceleratorsForJobSet(js)[tpu7xAccelerator]
+				(accels[tpu7xAccelerator] || accels[tpuV7xAccelerator])
 		})).
 		Owns(&v1alpha1.Slice{}).
 		Complete(r)
@@ -116,7 +119,9 @@ func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
 			continue
 		}
 		accel := podNodeSelector[acceleratorSelector]
-		if accel != tpu7xAccelerator {
+		switch accel {
+		case tpu7xAccelerator, tpuV7xAccelerator:
+		default:
 			continue
 		}
 		podAnnotations := rj.Template.Spec.Template.Annotations
