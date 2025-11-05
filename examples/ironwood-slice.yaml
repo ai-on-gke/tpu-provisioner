@@ -1,0 +1,60 @@
+apiVersion: jobset.x-k8s.io/v1alpha2
+kind: JobSet
+metadata:
+  name: ironwood-jobset-slice
+  labels:
+    app: my-job
+    kueue.x-k8s.io/queue-name: v7x-superslicing
+    kueue.x-k8s.io/priority-class: reservation-4x4x8
+  annotations:
+    tpu-provisioner.cloud.google.com/slice-autoprovisioning: "true"
+spec:
+  failurePolicy:
+    maxRestarts: 100
+  replicatedJobs:
+    - name: subslice-job
+      replicas: 2
+      template:
+        metadata:
+          annotations:
+            tpu-provisioner.cloud.google.com/inject-slice-selector: "true"
+        spec:
+          # Set backoff limit to 0 so job will immediately fail if any pod fails.
+          backoffLimit: 0
+          parallelism: 32
+          completions: 32
+          completionMode: Indexed
+          template:
+            metadata:
+              labels:
+                app: my-job
+            spec:
+              tolerations:
+              - key: google.com/tpu
+                operator: Exists
+                effect: NoSchedule
+              nodeSelector:
+                cloud.google.com/gke-tpu-accelerator: tpu7x
+                # TODO: Does this go into an annotation?
+                cloud.google.com/gke-tpu-topology: 4x4x8
+              containers:
+              - name: jax
+                image: python:3.8
+                ports:
+                - containerPort: 8471
+                - containerPort: 8080
+                command:
+                - bash
+                - -c
+                - |
+                  printenv
+                  pip install "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+                  python -c 'import os; print(os.environ, flush=True); import jax; print("Global device count:", jax.device_count(), "Local device count:", jax.local_device_count())'
+                securityContext:
+                  privileged: true
+                resources:
+                  requests:
+                    google.com/tpu: 4
+                  limits:
+                    google.com/tpu: 4
+              restartPolicy: Never

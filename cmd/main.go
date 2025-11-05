@@ -38,6 +38,7 @@ import (
 	"cloud.google.com/go/compute/metadata"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
+	jobwebhook "github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/webhook"
 
 	containerv1beta1 "google.golang.org/api/container/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -46,6 +47,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -53,16 +55,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 	//+kubebuilder:scaffold:imports
 )
 
 var (
-	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	scheme                = runtime.NewScheme()
+	setupLog              = ctrl.Log.WithName("setup")
+	enableSliceController = os.Getenv("ENABLE_SLICE_CONTROLLER") == "true"
 )
 
 func init() {
+	if enableSliceController {
+		utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	}
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
@@ -128,7 +135,8 @@ func main() {
 		},
 		WebhookServer: webhook.NewServer(
 			webhook.Options{
-				Port: 9443,
+				Port:    9443,
+				CertDir: "/certs",
 			},
 		),
 		Scheme:                 scheme,
@@ -237,6 +245,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	if enableSliceController {
+		if err := (&controller.SliceReconciler{
+			Client:   mgr.GetClient(),
+			Scheme:   mgr.GetScheme(),
+			Recorder: mgr.GetEventRecorderFor("tpu-provisioner"),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "SliceReconciler")
+			os.Exit(1)
+		}
+	}
+
 	if err := (&controller.CreationReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
@@ -265,6 +284,13 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "DeletionReconciler")
 		os.Exit(1)
 	}
+
+	// Register webhook handlers
+	jobWebhook := &jobwebhook.JobMutationHandler{
+		Decoder: admission.NewDecoder(scheme),
+	}
+	mgr.GetWebhookServer().Register("/mutate", &webhook.Admission{Handler: jobWebhook})
+
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
