@@ -13,6 +13,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
@@ -180,6 +181,72 @@ var _ = Describe("Slice controller", func() {
 			},
 		}),
 	)
+
+	It("should recreate Slices when slice-selection annotation changes", func() {
+		ctx := context.Background()
+		// Create test namespace
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-ns-",
+			},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+		// Clean up temporary namespace after test
+		defer func() {
+			Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
+		}()
+
+		// Create JobSet with initial slice selection
+		js := constructJobSet("test-js-update",
+			withAnnotation(controller.SliceProvisioningLabel, "true"),
+			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-1","cube-2"]]}`),
+			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu-v7x", "2x2x4")),
+		)
+		js.Namespace = ns.Name
+
+		By("Creating JobSet with initial slice selection")
+		Expect(k8sClient.Create(ctx, js)).To(Succeed())
+
+		By("Verifying initial Slices are created")
+		initialExpectedSlices := []ExpectedSliceSpec{
+			{
+				SliceSpec: v1alpha1.SliceSpec{
+					AcceleratorType:     "tpu-v7x",
+					AcceleratorTopology: "2x2x4",
+					NodeSelector: map[string][]string{
+						"cloud.google.com/gke-nodepool": {"cube-1", "cube-2"},
+					},
+				},
+				Replicas: 1,
+			},
+		}
+		assertSlicesCreated(ctx, js, initialExpectedSlices)
+
+		By("Updating slice selection annotation")
+		// Fetch the latest version of the JobSet
+		var updatedJS jobset.JobSet
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(js), &updatedJS)).To(Succeed())
+
+		// Update the annotation to select different cubes
+		updatedJS.Annotations[controller.SliceSelectionAnnotation] = `{"worker":[["cube-3","cube-4"]]}`
+		Expect(k8sClient.Update(ctx, &updatedJS)).To(Succeed())
+
+		By("Verifying Slices are recreated with updated NodeSelector")
+		updatedExpectedSlices := []ExpectedSliceSpec{
+			{
+				SliceSpec: v1alpha1.SliceSpec{
+					AcceleratorType:     "tpu-v7x",
+					AcceleratorTopology: "2x2x4",
+					NodeSelector: map[string][]string{
+						"cloud.google.com/gke-nodepool": {"cube-3", "cube-4"},
+					},
+				},
+				Replicas: 1,
+			},
+		}
+		assertSlicesCreated(ctx, &updatedJS, updatedExpectedSlices)
+	})
 })
 
 // JobSetOption is a function that modifies a JobSet.
@@ -265,78 +332,79 @@ func assertSlicesCreated(ctx context.Context, js *jobset.JobSet, expectedSlices 
 		totalExpectedCount += expected.Replicas
 	}
 
-	var sliceList v1alpha1.SliceList
-	Eventually(func() int {
+	Eventually(func() error {
+		var sliceList v1alpha1.SliceList
 		err := k8sClient.List(ctx, &sliceList)
 		if err != nil {
-			return 0
+			return fmt.Errorf("failed to list slices: %w", err)
 		}
 
-		// Count Slices that belong to this JobSet.
+		// Count Slices that belong to this JobSet and create a map to count slices matching each expected spec
 		count := 0
+		specCounts := make(map[int]int)
+
 		for _, slice := range sliceList.Items {
-			if slice.Namespace == js.Namespace {
-				// Check if the Slice is owned by the JobSet.
-				for _, ownerRef := range slice.OwnerReferences {
-					if ownerRef.UID == js.UID {
-						count++
-						break
+			if slice.Namespace != js.Namespace {
+				continue
+			}
+
+			// Check if the Slice is owned by the JobSet.
+			isOwned := false
+			for _, ownerRef := range slice.OwnerReferences {
+				if ownerRef.UID == js.UID {
+					isOwned = true
+					if ownerRef.Kind != "JobSet" {
+						return fmt.Errorf("expected owner kind JobSet, got %s", ownerRef.Kind)
 					}
-				}
-			}
-		}
-		return count
-	}, 3*time.Second, time.Second).Should(Equal(totalExpectedCount))
-
-	// Create a map to count slices matching each expected spec
-	specCounts := make(map[int]int)
-
-	for _, slice := range sliceList.Items {
-		if slice.Namespace != js.Namespace {
-			continue
-		}
-
-		// Check if the Slice is owned by the JobSet.
-		isOwned := false
-		for _, ownerRef := range slice.OwnerReferences {
-			if ownerRef.UID == js.UID {
-				isOwned = true
-				Expect(ownerRef.Kind).To(Equal("JobSet"))
-				Expect(ownerRef.Name).To(Equal(js.Name))
-				Expect(*ownerRef.Controller).To(BeTrue())
-				break
-			}
-		}
-
-		if isOwned {
-			// Find which expected spec this slice matches
-			matched := false
-			for i, expected := range expectedSlices {
-				diff := cmp.Diff(expected.SliceSpec, slice.Spec)
-				if diff == "" {
-					specCounts[i]++
-					matched = true
+					if ownerRef.Name != js.Name {
+						return fmt.Errorf("expected owner name %s, got %s", js.Name, ownerRef.Name)
+					}
+					if !*ownerRef.Controller {
+						return fmt.Errorf("expected owner to be controller")
+					}
+					count++
 					break
 				}
 			}
 
-			// If no match found, show diffs against all expected specs for debugging
-			if !matched {
-				var diffs string
+			if isOwned {
+				// Find which expected spec this slice matches
+				matched := false
 				for i, expected := range expectedSlices {
 					diff := cmp.Diff(expected.SliceSpec, slice.Spec)
-					diffs += fmt.Sprintf("\nDiff against expected spec %d:\n%s", i, diff)
+					if diff == "" {
+						specCounts[i]++
+						matched = true
+						break
+					}
 				}
-				Fail(fmt.Sprintf("Slice should match one of the expected specs.%s", diffs))
+
+				// If no match found, show diffs against all expected specs for debugging
+				if !matched {
+					var diffs string
+					for i, expected := range expectedSlices {
+						diff := cmp.Diff(expected.SliceSpec, slice.Spec)
+						diffs += fmt.Sprintf("\nDiff against expected spec %d:\n%s", i, diff)
+					}
+					return fmt.Errorf("slice should match one of the expected specs.%s", diffs)
+				}
 			}
 		}
-	}
 
-	// Verify that the count of slices matching each spec equals the expected replicas
-	for i, expected := range expectedSlices {
-		Expect(specCounts[i]).To(Equal(expected.Replicas),
-			"Expected %d slices matching spec %d, but found %d", expected.Replicas, i, specCounts[i])
-	}
+		// Verify count matches expected
+		if count != totalExpectedCount {
+			return fmt.Errorf("expected %d slices, got %d", totalExpectedCount, count)
+		}
+
+		// Verify that the count of slices matching each spec equals the expected replicas
+		for i, expected := range expectedSlices {
+			if specCounts[i] != expected.Replicas {
+				return fmt.Errorf("expected %d slices matching spec %d, but found %d", expected.Replicas, i, specCounts[i])
+			}
+		}
+
+		return nil
+	}, 3*time.Second, time.Second).Should(Succeed())
 }
 
 // assertSlicesNotCreated validates that no Slice resources were created for the given JobSet.

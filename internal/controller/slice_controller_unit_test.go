@@ -56,17 +56,7 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1alpha1.Slice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-0",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
-					},
-				},
+				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4"),
 			},
 			wantErr: false,
 		},
@@ -104,39 +94,9 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1alpha1.Slice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-0",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-1",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-2",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
-					},
-				},
+				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4"),
+				makeSlice("js-test-jobset-test-uid-worker-1", "2x2x4"),
+				makeSlice("js-test-jobset-test-uid-worker-2", "2x2x4"),
 			},
 			wantErr: false,
 		},
@@ -194,39 +154,9 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1alpha1.Slice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-1-0",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-1-1",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-2-0",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x2",
-						NodeSelector:        map[string][]string{},
-					},
-				},
+				makeSlice("js-test-jobset-test-uid-worker-1-0", "2x2x4"),
+				makeSlice("js-test-jobset-test-uid-worker-1-1", "2x2x4"),
+				makeSlice("js-test-jobset-test-uid-worker-2-0", "2x2x2"),
 			},
 			wantErr: false,
 		},
@@ -417,32 +347,8 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1alpha1.Slice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-0",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector: map[string][]string{
-							cubeSelectionLabel: {"cube-1", "cube-2"},
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-1",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector: map[string][]string{
-							cubeSelectionLabel: {"cube-3", "cube-4"},
-						},
-					},
-				},
+				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4", "cube-1", "cube-2"),
+				makeSlice("js-test-jobset-test-uid-worker-1", "2x2x4", "cube-3", "cube-4"),
 			},
 			wantErr: false,
 		},
@@ -523,30 +429,8 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1alpha1.Slice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-0",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector: map[string][]string{
-							cubeSelectionLabel: {"cube-1", "cube-2"},
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-worker-1",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
-					},
-				},
+				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4", "cube-1", "cube-2"),
+				makeSlice("js-test-jobset-test-uid-worker-1", "2x2x4"),
 			},
 			wantErr: false,
 		},
@@ -584,17 +468,7 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1alpha1.Slice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-this-is-a-very-long-jobset-name--test-uid-long-repli-0",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
-					},
-				},
+				makeSlice("js-this-is-a-very-long-jobset-name--test-uid-long-repli-0", "2x2x4"),
 			},
 			wantErr: false,
 		},
@@ -652,17 +526,7 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1alpha1.Slice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-						Name:      "js-test-jobset-test-uid-v7x-worker-0",
-					},
-					Spec: v1alpha1.SliceSpec{
-						AcceleratorType:     tpu7xAccelerator,
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
-					},
-				},
+				makeSlice("js-test-jobset-test-uid-v7x-worker-0", "2x2x4"),
 			},
 			wantErr: false,
 		},
@@ -803,6 +667,95 @@ func TestParseSliceSelection(t *testing.T) {
 				t.Errorf("parseSliceSelection() mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestDiffSlices(t *testing.T) {
+	tests := []struct {
+		name         string
+		desired      []v1alpha1.Slice
+		existing     []v1alpha1.Slice
+		wantToDelete []v1alpha1.Slice
+		wantToCreate []v1alpha1.Slice
+	}{
+		{
+			name: "create new slices when none exist",
+			desired: []v1alpha1.Slice{
+				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+			},
+			existing:     []v1alpha1.Slice{},
+			wantToDelete: nil,
+			wantToCreate: []v1alpha1.Slice{
+				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+			},
+		},
+		{
+			name: "delete slices with changed NodeSelector without creating replacements",
+			desired: []v1alpha1.Slice{
+				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-5", "cube-6"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-7", "cube-8"),
+			},
+			existing: []v1alpha1.Slice{
+				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+			},
+			wantToDelete: []v1alpha1.Slice{
+				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+			},
+			wantToCreate: nil,
+		},
+		{
+			name: "no changes when NodeSelectors match",
+			desired: []v1alpha1.Slice{
+				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+			},
+			existing: []v1alpha1.Slice{
+				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+			},
+			wantToDelete: nil,
+			wantToCreate: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotToDelete, gotToCreate := diffSlices(tt.desired, tt.existing)
+			if diff := cmp.Diff(tt.wantToDelete, gotToDelete); diff != "" {
+				t.Errorf("diffSlices() toDelete mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(tt.wantToCreate, gotToCreate); diff != "" {
+				t.Errorf("diffSlices() toCreate mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// Helper function to create a Slice object for testing
+func makeSlice(name, topology string, cubes ...string) v1alpha1.Slice {
+	return makeSliceWithAccel(name, tpu7xAccelerator, topology, cubes...)
+}
+
+// Helper function to create a Slice object with custom accelerator type
+func makeSliceWithAccel(name, accelType, topology string, cubes ...string) v1alpha1.Slice {
+	nodeSelector := map[string][]string{}
+	if len(cubes) > 0 {
+		nodeSelector[cubeSelectionLabel] = cubes
+	}
+	return v1alpha1.Slice{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      name,
+		},
+		Spec: v1alpha1.SliceSpec{
+			AcceleratorType:     accelType,
+			AcceleratorTopology: topology,
+			NodeSelector:        nodeSelector,
+		},
 	}
 }
 
