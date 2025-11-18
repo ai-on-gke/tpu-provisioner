@@ -72,15 +72,15 @@ var _ = Describe("Slice controller", func() {
 		Entry("JobSet with slice provisioning enabled and v7x accelerator should create Slices", &testCase{
 			jobSet: constructJobSet("test-js-1",
 				withAnnotation(controller.SliceProvisioningLabel, "true"),
-				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu-v7x", "2x2x4")),
+				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 			),
 			wantSliceCreation: true,
 			expectedSlices: []ExpectedSliceSpec{
 				{
 					SliceSpec: v1alpha1.SliceSpec{
-						AcceleratorType:     "tpu-v7x",
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
+						Type:         "tpu7x",
+						Topology:     "2x2x4",
+						PartitionIds: nil,
 					},
 					Replicas: 2,
 				},
@@ -95,7 +95,7 @@ var _ = Describe("Slice controller", func() {
 		}),
 		Entry("JobSet without slice provisioning annotation should not create Slices", &testCase{
 			jobSet: constructJobSet("test-js-3",
-				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu-v7x", "2x2x4")),
+				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 			),
 			wantSliceCreation: false,
 		}),
@@ -103,22 +103,22 @@ var _ = Describe("Slice controller", func() {
 			jobSet: constructJobSet("test-js-4",
 				withAnnotation(controller.SliceProvisioningLabel, "true"),
 				withAnnotation(controller.DisableAutoProvisioningLabel, "true"),
-				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu-v7x", "2x2x4")),
+				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 			),
 			wantSliceCreation: false,
 		}),
 		Entry("JobSet with slice provisioning and multiple replicas should create multiple Slices", &testCase{
 			jobSet: constructJobSet("test-js-5",
 				withAnnotation(controller.SliceProvisioningLabel, "true"),
-				withReplicatedJob("worker", 3, makeJobTemplateWithTPU("tpu-v7x", "2x2x4")),
+				withReplicatedJob("worker", 3, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 			),
 			wantSliceCreation: true,
 			expectedSlices: []ExpectedSliceSpec{
 				{
 					SliceSpec: v1alpha1.SliceSpec{
-						AcceleratorType:     "tpu-v7x",
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
+						Type:         "tpu7x",
+						Topology:     "2x2x4",
+						PartitionIds: nil,
 					},
 					Replicas: 3,
 				},
@@ -127,54 +127,50 @@ var _ = Describe("Slice controller", func() {
 		Entry("JobSet with slice provisioning and 2 replicated jobs should create Slices for both", &testCase{
 			jobSet: constructJobSet("test-js-6",
 				withAnnotation(controller.SliceProvisioningLabel, "true"),
-				withReplicatedJob("worker-1", 2, makeJobTemplateWithTPU("tpu-v7x", "2x2x4")),
-				withReplicatedJob("worker-2", 1, makeJobTemplateWithTPU("tpu-v7x", "2x2x2")),
+				withReplicatedJob("worker-1", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+				withReplicatedJob("worker-2", 1, makeJobTemplateWithTPU("tpu7x", "2x2x2")),
 			),
 			wantSliceCreation: true,
 			expectedSlices: []ExpectedSliceSpec{
 				{
 					SliceSpec: v1alpha1.SliceSpec{
-						AcceleratorType:     "tpu-v7x",
-						AcceleratorTopology: "2x2x4",
-						NodeSelector:        map[string][]string{},
+						Type:         "tpu7x",
+						Topology:     "2x2x4",
+						PartitionIds: nil,
 					},
 					Replicas: 2,
 				},
 				{
 					SliceSpec: v1alpha1.SliceSpec{
-						AcceleratorType:     "tpu-v7x",
-						AcceleratorTopology: "2x2x2",
-						NodeSelector:        map[string][]string{},
+						Type:         "tpu7x",
+						Topology:     "2x2x2",
+						PartitionIds: nil,
 					},
 					Replicas: 1,
 				},
 			},
 		}),
-		Entry("JobSet with slice-selection annotation should create Slices with NodeSelector", &testCase{
+		Entry("JobSet with slice-selection annotation should create Slices with PartitionIds", &testCase{
 			jobSet: constructJobSet("test-js-7",
 				withAnnotation(controller.SliceProvisioningLabel, "true"),
 				withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-1","cube-2"],["cube-3","cube-4"]]}`),
-				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu-v7x", "2x2x4")),
+				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 			),
 			wantSliceCreation: true,
 			expectedSlices: []ExpectedSliceSpec{
 				{
 					SliceSpec: v1alpha1.SliceSpec{
-						AcceleratorType:     "tpu-v7x",
-						AcceleratorTopology: "2x2x4",
-						NodeSelector: map[string][]string{
-							"cloud.google.com/gke-nodepool": {"cube-1", "cube-2"},
-						},
+						Type:         "tpu7x",
+						Topology:     "2x2x4",
+						PartitionIds: []string{"cube-1", "cube-2"},
 					},
 					Replicas: 1,
 				},
 				{
 					SliceSpec: v1alpha1.SliceSpec{
-						AcceleratorType:     "tpu-v7x",
-						AcceleratorTopology: "2x2x4",
-						NodeSelector: map[string][]string{
-							"cloud.google.com/gke-nodepool": {"cube-3", "cube-4"},
-						},
+						Type:         "tpu7x",
+						Topology:     "2x2x4",
+						PartitionIds: []string{"cube-3", "cube-4"},
 					},
 					Replicas: 1,
 				},
@@ -201,7 +197,7 @@ var _ = Describe("Slice controller", func() {
 		js := constructJobSet("test-js-update",
 			withAnnotation(controller.SliceProvisioningLabel, "true"),
 			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-1","cube-2"]]}`),
-			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu-v7x", "2x2x4")),
+			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 		)
 		js.Namespace = ns.Name
 
@@ -212,11 +208,9 @@ var _ = Describe("Slice controller", func() {
 		initialExpectedSlices := []ExpectedSliceSpec{
 			{
 				SliceSpec: v1alpha1.SliceSpec{
-					AcceleratorType:     "tpu-v7x",
-					AcceleratorTopology: "2x2x4",
-					NodeSelector: map[string][]string{
-						"cloud.google.com/gke-nodepool": {"cube-1", "cube-2"},
-					},
+					Type:         "tpu7x",
+					Topology:     "2x2x4",
+					PartitionIds: []string{"cube-1", "cube-2"},
 				},
 				Replicas: 1,
 			},
@@ -232,15 +226,13 @@ var _ = Describe("Slice controller", func() {
 		updatedJS.Annotations[controller.SliceSelectionAnnotation] = `{"worker":[["cube-3","cube-4"]]}`
 		Expect(k8sClient.Update(ctx, &updatedJS)).To(Succeed())
 
-		By("Verifying Slices are recreated with updated NodeSelector")
+		By("Verifying Slices are recreated with updated PartitionIds")
 		updatedExpectedSlices := []ExpectedSliceSpec{
 			{
 				SliceSpec: v1alpha1.SliceSpec{
-					AcceleratorType:     "tpu-v7x",
-					AcceleratorTopology: "2x2x4",
-					NodeSelector: map[string][]string{
-						"cloud.google.com/gke-nodepool": {"cube-3", "cube-4"},
-					},
+					Type:         "tpu7x",
+					Topology:     "2x2x4",
+					PartitionIds: []string{"cube-3", "cube-4"},
 				},
 				Replicas: 1,
 			},
@@ -344,6 +336,7 @@ func assertSlicesCreated(ctx context.Context, js *jobset.JobSet, expectedSlices 
 		specCounts := make(map[int]int)
 
 		for _, slice := range sliceList.Items {
+			// NOTE: Slice is no longer namespaced.
 			if slice.Namespace != js.Namespace {
 				continue
 			}
@@ -419,13 +412,11 @@ func assertSlicesNotCreated(ctx context.Context, js *jobset.JobSet) {
 		// Count Slices that belong to this JobSet.
 		count := 0
 		for _, slice := range sliceList.Items {
-			if slice.Namespace == js.Namespace {
-				// Check if the Slice is owned by the JobSet.
-				for _, ownerRef := range slice.OwnerReferences {
-					if ownerRef.UID == js.UID {
-						count++
-						break
-					}
+			// Check if the Slice is owned by the JobSet.
+			for _, ownerRef := range slice.OwnerReferences {
+				if ownerRef.UID == js.UID {
+					count++
+					break
 				}
 			}
 		}

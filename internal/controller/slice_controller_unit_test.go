@@ -742,19 +742,15 @@ func makeSlice(name, topology string, cubes ...string) v1alpha1.Slice {
 
 // Helper function to create a Slice object with custom accelerator type
 func makeSliceWithAccel(name, accelType, topology string, cubes ...string) v1alpha1.Slice {
-	nodeSelector := map[string][]string{}
-	if len(cubes) > 0 {
-		nodeSelector[cubeSelectionLabel] = cubes
-	}
 	return v1alpha1.Slice{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      name,
 		},
 		Spec: v1alpha1.SliceSpec{
-			AcceleratorType:     accelType,
-			AcceleratorTopology: topology,
-			NodeSelector:        nodeSelector,
+			Type:         v1alpha1.Type(accelType),
+			Topology:     topology,
+			PartitionIds: cubes,
 		},
 	}
 }

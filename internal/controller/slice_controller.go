@@ -20,7 +20,7 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
-const cubeSelectionLabel = "cloud.google.com/gke-nodepool"
+const cubeIDLabel = "cloud.google.com/gke-tpu-slice-4x4x4-id"
 
 const SliceProvisioningLabel = "tpu-provisioner.cloud.google.com/slice-autoprovisioning"
 
@@ -86,7 +86,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Create new slices
 	for _, slice := range toCreate {
 		log.Info("Creating Slice for JobSet", "slice", slice.Name,
-			"specifiedCubeCount", len(slice.Spec.NodeSelector[cubeSelectionLabel]))
+			"partitionCount", len(slice.Spec.PartitionIds))
 
 		if err := controllerutil.SetControllerReference(&js, &slice, r.Scheme); err != nil {
 			return ctrl.Result{}, fmt.Errorf("setting controller reference on slice %s/%s: %w", slice.Namespace, slice.Name, err)
@@ -174,18 +174,18 @@ func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
 				},
 				Spec: v1alpha1.SliceSpec{
 					// TODO: Check that this is the correct accelerator value to use.
-					AcceleratorType: accel,
+					Type: v1alpha1.Type(accel),
 					// TODO: check that this is the correct topology value to use.
-					AcceleratorTopology: topo,
+					Topology: topo,
 				},
 			}
 			if len(cubeSelection) >= i+1 {
-				s.Spec.NodeSelector = map[string][]string{
-					cubeSelectionLabel: cubeSelection[i],
-				}
+				s.Spec.PartitionIds = cubeSelection[i]
 			} else {
-				// NodeSelector is a required field, should that be changed?
-				s.Spec.NodeSelector = map[string][]string{}
+				// PartitionIds is a required field, should that be changed?
+				// TODO: Revisit this - I commented out the requirement in the test CRD for now
+				// since there is also a min(1) requirement.
+				//s.Spec.PartitionIds = []string{}
 			}
 			slices = append(slices, s)
 		}
@@ -211,25 +211,14 @@ func parseSliceSelection(js *jobset.JobSet) (map[string][][]string, error) {
 	return make(map[string][][]string), nil
 }
 
-// nodeSelectorsEqual compares two NodeSelector maps for equality.
-// Returns true if both maps have the same keys and corresponding slice values.
-func nodeSelectorsEqual(a, b map[string][]string) bool {
+// partitionsEqual compares two partition slices for equality.
+func partitionsEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for key, aVals := range a {
-		bVals, ok := b[key]
-		if !ok {
+	for i := 0; i < len(a); i++ {
+		if a[i] != b[i] {
 			return false
-		}
-		if len(aVals) != len(bVals) {
-			return false
-		}
-		// Check that all values in aVals are in bVals
-		for i, aVal := range aVals {
-			if i >= len(bVals) || aVal != bVals[i] {
-				return false
-			}
 		}
 	}
 	return true
@@ -251,7 +240,7 @@ func diffSlices(desired []v1alpha1.Slice, existing []v1alpha1.Slice) (toDelete, 
 	for _, desiredSlice := range desired {
 		if existingSlice, exists := existingMap[desiredSlice.Name]; exists {
 			// Slice exists - check if NodeSelector has changed
-			if !nodeSelectorsEqual(existingSlice.Spec.NodeSelector, desiredSlice.Spec.NodeSelector) {
+			if !partitionsEqual(existingSlice.Spec.PartitionIds, desiredSlice.Spec.PartitionIds) {
 				// NodeSelector changed - delete existing (creation will happen in next reconcile)
 				toDelete = append(toDelete, *existingSlice)
 			}

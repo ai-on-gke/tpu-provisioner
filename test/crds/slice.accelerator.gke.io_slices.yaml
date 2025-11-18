@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.17.2
   name: slices.slice.accelerator.gke.io
 spec:
   group: slice.accelerator.gke.io
@@ -12,17 +12,18 @@ spec:
     listKind: SliceList
     plural: slices
     singular: slice
+  #scope: Cluster
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.acceleratorType
+    - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .spec.acceleratorTopology
+    - jsonPath: .spec.topology
       name: Topology
       type: string
-    - jsonPath: .status.conditions[0].type
-      name: Status
+    - jsonPath: .status.conditions[?(@.type=="Ready")].reason
+      name: State
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -52,33 +53,34 @@ spec:
           spec:
             description: SliceSpec defines the desired state of Slice.
             properties:
-              acceleratorTopology:
-                description: Topology represents the network topology of the slice.
-                type: string
-              acceleratorType:
-                description: AcceleratorType specifies the type of accelerator used
-                  in this slice.
-                type: string
-              nodeSelector:
-                additionalProperties:
-                  items:
-                    type: string
-                  type: array
+              partitionIds:
                 description: |-
-                  Required, set of nodes to use to form a slice.
-                  NodeSelector specifies a set of label-based selectors for nodes that can form the
-                  slice. The controller will select nodes where for each key-value pair in the map,
-                  the node's label value for that key is present in the corresponding string slice.
-                  This allows for a flexible "match any of these values for this label" selection.
-                  The nodeSelector will follow an AND over the map entries but an OR within the list
-                  items of the entry.
-                  For example, to select nodes in cubes cube-1 and cube-2, you could use:
-                  {"cloud.google.com/gke-tpu-reservation-subblock": ["cube-1", "cube-2"]}
-                type: object
+                  PartitionIds denotes the set of partitions to use to form a slice
+                  For slices that span multiple partitions, it will be a list of 4x4x4 IDs
+                  For sub-partition topology, it will be a single entry corresponding to the ID of the partition
+                items:
+                  type: string
+                minItems: 1
+                type: array
+              topology:
+                description: |-
+                  Topology represents the network topology of the slice.
+                  It defines the physical arrangement of TPU chips in a 2D or 3D mesg.
+                  The topology must be specified in `<X>x<Y>` or `<X>x<Y>x<Z>` format.
+                pattern: ^\d+x\d+(x\d+)?$
+                type: string
+              type:
+                description: Type specifies the type of accelerator used in this slice,
+                  e.g., "v6e", "tpu7x".
+                enum:
+                - v6e
+                - tpu7x
+                type: string
             required:
-            - acceleratorTopology
-            - acceleratorType
-            - nodeSelector
+            # UPDATED to remove the requirement.
+            #- partitionIds
+            - topology
+            - type
             type: object
           status:
             description: SliceStatus defines the observed state of Slice.
