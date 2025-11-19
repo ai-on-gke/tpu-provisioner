@@ -239,6 +239,70 @@ var _ = Describe("Slice controller", func() {
 		}
 		assertSlicesCreated(ctx, &updatedJS, updatedExpectedSlices)
 	})
+
+	It("should delete Slices when owning JobSet is deleted", func() {
+		ctx := context.Background()
+		// Create test namespace
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-ns-",
+			},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+		// Clean up temporary namespace after test
+		defer func() {
+			Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
+		}()
+
+		// Create JobSet with slice provisioning
+		js := constructJobSet("test-js-deletion",
+			withAnnotation(controller.SliceProvisioningLabel, "true"),
+			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+		)
+		js.Namespace = ns.Name
+
+		By("Creating JobSet")
+		Expect(k8sClient.Create(ctx, js)).To(Succeed())
+
+		By("Verifying Slices are created")
+		expectedSlices := []ExpectedSliceSpec{
+			{
+				SliceSpec: v1alpha1.SliceSpec{
+					Type:         "tpu7x",
+					Topology:     "2x2x4",
+					PartitionIds: nil,
+				},
+				Replicas: 2,
+			},
+		}
+		assertSlicesCreated(ctx, js, expectedSlices)
+
+		By("Deleting the JobSet")
+		Expect(k8sClient.Delete(ctx, js)).To(Succeed())
+
+		By("Verifying Slices are deleted")
+		Eventually(func() int {
+			var sliceList v1alpha1.SliceList
+			err := k8sClient.List(ctx, &sliceList)
+			if err != nil {
+				return -1
+			}
+			// Count slices owned by this JobSet
+			count := 0
+			for _, slice := range sliceList.Items {
+				if slice.Labels != nil {
+					isOwnedByJobSet := slice.Labels[controller.SliceOwnerKindLabel] == "jobset"
+					jobsetName, hasName := slice.Labels[controller.SliceOwnerNameLabel]
+					jobsetNamespace, hasNamespace := slice.Labels[controller.SliceOwnerNamespaceLabel]
+					if isOwnedByJobSet && hasName && hasNamespace && jobsetName == js.Name && jobsetNamespace == js.Namespace {
+						count++
+					}
+				}
+			}
+			return count
+		}, 10*time.Second, time.Second).Should(Equal(0))
+	})
 })
 
 // JobSetOption is a function that modifies a JobSet.
@@ -336,27 +400,14 @@ func assertSlicesCreated(ctx context.Context, js *jobset.JobSet, expectedSlices 
 		specCounts := make(map[int]int)
 
 		for _, slice := range sliceList.Items {
-			// NOTE: Slice is no longer namespaced.
-			if slice.Namespace != js.Namespace {
-				continue
-			}
-
-			// Check if the Slice is owned by the JobSet.
+			// Check if the Slice is owned by the JobSet via labels.
 			isOwned := false
-			for _, ownerRef := range slice.OwnerReferences {
-				if ownerRef.UID == js.UID {
+			if slice.Labels != nil {
+				jobsetName, hasName := slice.Labels[controller.SliceOwnerNameLabel]
+				jobsetNamespace, hasNamespace := slice.Labels[controller.SliceOwnerNamespaceLabel]
+				if hasName && hasNamespace && jobsetName == js.Name && jobsetNamespace == js.Namespace {
 					isOwned = true
-					if ownerRef.Kind != "JobSet" {
-						return fmt.Errorf("expected owner kind JobSet, got %s", ownerRef.Kind)
-					}
-					if ownerRef.Name != js.Name {
-						return fmt.Errorf("expected owner name %s, got %s", js.Name, ownerRef.Name)
-					}
-					if !*ownerRef.Controller {
-						return fmt.Errorf("expected owner to be controller")
-					}
 					count++
-					break
 				}
 			}
 
@@ -412,11 +463,12 @@ func assertSlicesNotCreated(ctx context.Context, js *jobset.JobSet) {
 		// Count Slices that belong to this JobSet.
 		count := 0
 		for _, slice := range sliceList.Items {
-			// Check if the Slice is owned by the JobSet.
-			for _, ownerRef := range slice.OwnerReferences {
-				if ownerRef.UID == js.UID {
+			// Check if the Slice is owned by the JobSet via labels.
+			if slice.Labels != nil {
+				jobsetName, hasName := slice.Labels[controller.SliceOwnerNameLabel]
+				jobsetNamespace, hasNamespace := slice.Labels[controller.SliceOwnerNamespaceLabel]
+				if hasName && hasNamespace && jobsetName == js.Name && jobsetNamespace == js.Namespace {
 					count++
-					break
 				}
 			}
 		}

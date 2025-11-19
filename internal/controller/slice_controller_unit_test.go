@@ -468,7 +468,7 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1alpha1.Slice{
-				makeSlice("js-this-is-a-very-long-jobset-name--test-uid-long-repli-0", "2x2x4"),
+				makeSliceWithJobSet("js-this-is-a-very-long-jobset-name--test-uid-long-repli-0", tpu7xAccelerator, "2x2x4", "this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", "default"),
 			},
 			wantErr: false,
 		},
@@ -742,10 +742,19 @@ func makeSlice(name, topology string, cubes ...string) v1alpha1.Slice {
 
 // Helper function to create a Slice object with custom accelerator type
 func makeSliceWithAccel(name, accelType, topology string, cubes ...string) v1alpha1.Slice {
+	return makeSliceWithJobSet(name, accelType, topology, "test-jobset", "default", cubes...)
+}
+
+// Helper function to create a Slice object with custom JobSet name and namespace
+func makeSliceWithJobSet(name, accelType, topology, jobsetName, jobsetNamespace string, cubes ...string) v1alpha1.Slice {
 	return v1alpha1.Slice{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "default",
-			Name:      name,
+			Name: name,
+			Labels: map[string]string{
+				SliceOwnerKindLabel:      "jobset",
+				SliceOwnerNameLabel:      jobsetName,
+				SliceOwnerNamespaceLabel: jobsetNamespace,
+			},
 		},
 		Spec: v1alpha1.SliceSpec{
 			Type:         v1alpha1.Type(accelType),

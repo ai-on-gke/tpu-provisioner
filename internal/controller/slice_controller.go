@@ -11,18 +11,30 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
-const cubeIDLabel = "cloud.google.com/gke-tpu-slice-4x4x4-id"
-
 const SliceProvisioningLabel = "tpu-provisioner.cloud.google.com/slice-autoprovisioning"
+
+// Finalizer to ensure Slices are cleaned up when JobSet is deleted
+const SliceCleanupFinalizer = "tpu-provisioner.cloud.google.com/slice-cleanup"
+
+// Labels used to track which resource (i.e. JobSet) owns a Slice
+// since Cluster scopred resources cannot use owner references to Namespaced resources.
+const (
+	SliceOwnerKindLabel      = "tpu-provisioner.cloud.google.com/owner-kind"
+	SliceOwnerNameLabel      = "tpu-provisioner.cloud.google.com/owner-name"
+	SliceOwnerNamespaceLabel = "tpu-provisioner.cloud.google.com/owner-namespace"
+)
 
 /*
 Example value:
@@ -56,16 +68,56 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, fmt.Errorf("getting jobset: %w", err)
 	}
 
+	// Get all existing slices owned by this JobSet (using labels instead of owner references)
+	var existingSliceList v1alpha1.SliceList
+	if err := r.List(ctx, &existingSliceList,
+		client.MatchingLabels{
+			SliceOwnerKindLabel:      "jobset",
+			SliceOwnerNameLabel:      js.Name,
+			SliceOwnerNamespaceLabel: js.Namespace,
+		}); err != nil {
+		return ctrl.Result{}, fmt.Errorf("listing existing slices: %w", err)
+	}
+
+	// Check if JobSet is being deleted or is in a terminal state
+	if js.DeletionTimestamp != nil || jobSetCompleted(&js) || jobSetFailed(&js) {
+		// Delete all Slices for this JobSet
+		log.Info("JobSet is being deleted, cleaning up Slices", "sliceCount", len(existingSliceList.Items))
+
+		for _, slice := range existingSliceList.Items {
+			if slice.DeletionTimestamp == nil {
+				log.Info("Deleting Slice for JobSet cleanup", "slice", slice.Name)
+				if err := r.Delete(ctx, &slice); err != nil && !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("deleting slice %s: %w", slice.Name, err)
+				}
+			}
+		}
+
+		// Remove finalizer once all deletion requests have been issued
+		// (don't wait for Slices to be fully deleted/finalized)
+		if controllerutil.ContainsFinalizer(&js, SliceCleanupFinalizer) {
+			log.Info("Removing finalizer from JobSet", "finalizer", SliceCleanupFinalizer)
+			controllerutil.RemoveFinalizer(&js, SliceCleanupFinalizer)
+			if err := r.Update(ctx, &js); err != nil {
+				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(&js, SliceCleanupFinalizer) {
+		log.Info("Adding finalizer to JobSet", "finalizer", SliceCleanupFinalizer)
+		controllerutil.AddFinalizer(&js, SliceCleanupFinalizer)
+		if err := r.Update(ctx, &js); err != nil {
+			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
+		}
+	}
+
 	desiredSlices, err := jobsetSlices(&js)
 	if err != nil {
 		log.Error(err, "Error converting JobSet to Slices")
 		return ctrl.Result{}, nil
-	}
-
-	// Get all existing slices owned by this JobSet
-	var existingSliceList v1alpha1.SliceList
-	if err := r.List(ctx, &existingSliceList, client.InNamespace(js.Namespace), client.MatchingFields{".metadata.controller": string(js.UID)}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("listing existing slices: %w", err)
 	}
 
 	// Determine which slices to delete and create
@@ -79,7 +131,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		log.Info("Deleting Slice due to NodeSelector change", "slice", slice.Name)
 		if err := r.Delete(ctx, &slice); err != nil {
-			return ctrl.Result{}, fmt.Errorf("deleting slice %s/%s: %w", slice.Namespace, slice.Name, err)
+			return ctrl.Result{}, fmt.Errorf("deleting slice %s: %w", slice.Name, err)
 		}
 	}
 
@@ -88,18 +140,14 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.Info("Creating Slice for JobSet", "slice", slice.Name,
 			"partitionCount", len(slice.Spec.PartitionIds))
 
-		if err := controllerutil.SetControllerReference(&js, &slice, r.Scheme); err != nil {
-			return ctrl.Result{}, fmt.Errorf("setting controller reference on slice %s/%s: %w", slice.Namespace, slice.Name, err)
-		}
-
 		if err := r.Create(ctx, &slice); err != nil {
-			return ctrl.Result{}, fmt.Errorf("creating slice %s/%s: %w", slice.Namespace, slice.Name, err)
+			return ctrl.Result{}, fmt.Errorf("creating slice %s: %w", slice.Name, err)
 		}
 	}
 
 	// Requeue in order to recreate.
 	// NOTE: This should happen via an automatic re-reconcile after the DELETE, but
-	// in integration tests it appeared not to happen.
+	// in integration tests it appears not to happen.
 	var res ctrl.Result
 	if len(toDelete) > 0 {
 		res.RequeueAfter = time.Second
@@ -109,18 +157,6 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 }
 
 func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Set up an index to list Slices by their owner UID
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.Slice{}, ".metadata.controller", func(rawObj client.Object) []string {
-		slice := rawObj.(*v1alpha1.Slice)
-		owner := metav1.GetControllerOf(slice)
-		if owner == nil {
-			return nil
-		}
-		return []string{string(owner.UID)}
-	}); err != nil {
-		return err
-	}
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&jobset.JobSet{}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
@@ -133,8 +169,41 @@ func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				!autoProvisioningDisabledForJobSet(js) &&
 				(accels[tpu7xAccelerator] || accels[tpuV7xAccelerator])
 		})).
-		Owns(&v1alpha1.Slice{}).
+		Watches(
+			&v1alpha1.Slice{},
+			handler.EnqueueRequestsFromMapFunc(r.sliceToJobSetRequests),
+		).
 		Complete(r)
+}
+
+// sliceToJobSetRequests maps a Slice to its owning JobSet using labels
+func (r *SliceReconciler) sliceToJobSetRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	slice, ok := obj.(*v1alpha1.Slice)
+	if !ok {
+		return nil
+	}
+
+	// Get the owning JobSet from labels
+	if slice.Labels == nil {
+		return nil
+	}
+
+	ownerKind := slice.Labels[SliceOwnerKindLabel]
+	jobsetName, hasName := slice.Labels[SliceOwnerNameLabel]
+	jobsetNamespace, hasNamespace := slice.Labels[SliceOwnerNamespaceLabel]
+
+	if ownerKind != "jobset" || !hasName || !hasNamespace {
+		return nil
+	}
+
+	return []reconcile.Request{
+		{
+			NamespacedName: types.NamespacedName{
+				Name:      jobsetName,
+				Namespace: jobsetNamespace,
+			},
+		},
+	}
 }
 
 func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
@@ -169,8 +238,13 @@ func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
 		for i := 0; i < int(rj.Replicas); i++ {
 			s := v1alpha1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: js.Namespace,
-					Name:      utils.SliceName(js.Name, string(js.UID), rj.Name, i),
+					Name: utils.SliceName(js.Name, string(js.UID), rj.Name, i),
+					Labels: map[string]string{
+						// Track ownership with labels (can't use owner references since Slice is Cluster scoped)
+						SliceOwnerKindLabel:      "jobset",
+						SliceOwnerNameLabel:      js.Name,
+						SliceOwnerNamespaceLabel: js.Namespace,
+					},
 				},
 				Spec: v1alpha1.SliceSpec{
 					// TODO: Check that this is the correct accelerator value to use.
