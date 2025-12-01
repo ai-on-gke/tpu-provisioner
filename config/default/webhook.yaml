@@ -34,6 +34,9 @@ webhooks:
     - key: tpu-provisioner.cloud.google.com/disable-autoprovisioning
       operator: NotIn
       values: ["true"]
+    - key: tpu-provisioner.cloud.google.com/inject-slice-selector
+      operator: In
+      values: ["true"]
   failurePolicy: Fail
   timeoutSeconds: 20
   clientConfig:

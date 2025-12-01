@@ -75,32 +75,6 @@ func isLeaderPod(pod *corev1.Pod) bool {
 	return pod.Annotations[batchv1.JobCompletionIndexAnnotation] == "0"
 }
 
-// autoProvisioningDisabled returns true if the pod has
-// "tpu-provisioner.cloud.google.com/disable-autoprovisioning=true"
-// set as a label or annotation. Otherwise, it returns false.
-func autoProvisioningDisabled(pod *corev1.Pod) bool {
-	return pod.Labels[DisableAutoProvisioningLabel] == "true" || pod.Annotations[DisableAutoProvisioningLabel] == "true"
-}
-
-// autoProvisioningDisabledForJobSet returns true if the JobSet or Pod spec has
-// "tpu-provisioner.cloud.google.com/disable-autoprovisioning=true"
-// set as a label or annotation. Otherwise, it returns false.
-func autoProvisioningDisabledForJobSet(js *jobset.JobSet) bool {
-	if js.Labels[DisableAutoProvisioningLabel] == "true" || js.Annotations[DisableAutoProvisioningLabel] == "true" {
-		return true
-	}
-	// Historically, auto provisioning was disabled via the Pod metadata. Keep the same logic.
-	for _, rj := range js.Spec.ReplicatedJobs {
-		if podLabels := rj.Template.Spec.Template.Labels; podLabels != nil && podLabels[DisableAutoProvisioningLabel] == "true" {
-			return true
-		}
-		if podAnn := rj.Template.Spec.Template.Annotations; podAnn != nil && podAnn[DisableAutoProvisioningLabel] == "true" {
-			return true
-		}
-	}
-	return false
-}
-
 func acceleratorsForJobSet(js *jobset.JobSet) map[string]bool {
 	acc := map[string]bool{}
 
@@ -113,8 +87,4 @@ func acceleratorsForJobSet(js *jobset.JobSet) map[string]bool {
 	}
 
 	return acc
-}
-
-func sliceProvisioningEnabled(js *jobset.JobSet) bool {
-	return js.Annotations != nil && js.Annotations[SliceProvisioningLabel] == "true"
 }

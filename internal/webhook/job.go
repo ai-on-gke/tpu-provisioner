@@ -33,7 +33,7 @@ import (
 var log = ctrl.Log.WithName("webhook")
 
 const SliceNodeSelector = "cloud.google.com/gke-tpu-slice"
-const InjectSliceSelectorAnnotation = "tpu-provisioner.cloud.google.com/inject-slice-selector"
+const InjectSliceSelectorLabel = "tpu-provisioner.cloud.google.com/inject-slice-selector"
 
 // JobMutationHandler handles admission requests for Job mutations
 type JobMutationHandler struct {
@@ -51,19 +51,24 @@ func (h *JobMutationHandler) Handle(ctx context.Context, req admission.Request) 
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
-	if job.Annotations == nil {
-		return admission.Response{}
+	if job.Labels == nil {
+		return admission.Allowed("missing job labels")
 	}
-	if job.Annotations[InjectSliceSelectorAnnotation] != "true" {
-		return admission.Response{}
+	if job.Labels[InjectSliceSelectorLabel] != "true" {
+		// This should never happen if the mutating webhook config is correct.
+		return admission.Allowed("inject-slice-selector annotation not set to true")
+	}
+
+	if job.Annotations == nil {
+		return admission.Allowed("no annotations present")
 	}
 	var jobsetName string
 	if jobsetName = job.Annotations[jobset.JobSetNameKey]; jobsetName == "" {
-		return admission.Response{}
+		return admission.Allowed("missing JobSet name annotation")
 	}
 	var replicatedJobName string
 	if replicatedJobName = job.Annotations[jobset.ReplicatedJobNameKey]; replicatedJobName == "" {
-		return admission.Response{}
+		return admission.Allowed("missing replicated job name annotation")
 	}
 	var replicatedJobIndex int
 	if idxStr := job.Annotations[jobset.JobIndexKey]; idxStr != "" {
@@ -73,7 +78,7 @@ func (h *JobMutationHandler) Handle(ctx context.Context, req admission.Request) 
 		}
 		replicatedJobIndex = x
 	} else {
-		return admission.Response{}
+		return admission.Allowed("missing job index annotation")
 	}
 	var jobsetUID string
 	for _, ref := range job.OwnerReferences {
@@ -82,7 +87,7 @@ func (h *JobMutationHandler) Handle(ctx context.Context, req admission.Request) 
 		}
 	}
 	if jobsetUID == "" {
-		return admission.Response{}
+		return admission.Allowed("missing JobSet owner reference")
 	}
 
 	if job.Spec.Template.Spec.NodeSelector == nil {

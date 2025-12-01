@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -125,8 +126,8 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if jobSetCompleted(&js) || jobSetFailed(&js) {
 		return r.deleteNodePool(ctx, &node, fmt.Sprintf("JobSet %s execution has ended (completed or failed)", jobSetName))
 	}
-	if sliceProvisioningEnabled(&js) {
-		lg.Info("ignoring nodepool autoprovisioning since slice provisioning is enabled", "label", SliceProvisioningLabel)
+	if utils.SliceProvisioningEnabled(&js) {
+		lg.Info("ignoring nodepool autoprovisioning since slice provisioning is enabled", "label", utils.SliceProvisioningLabel)
 		return ctrl.Result{}, nil
 	}
 

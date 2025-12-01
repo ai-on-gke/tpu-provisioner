@@ -23,8 +23,6 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
-const SliceProvisioningLabel = "tpu-provisioner.cloud.google.com/slice-autoprovisioning"
-
 // Finalizer to ensure Slices are cleaned up when JobSet is deleted
 const SliceCleanupFinalizer = "tpu-provisioner.cloud.google.com/slice-cleanup"
 
@@ -145,6 +143,13 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// Handle sync mode: suspend JobSet until all Slices are Ready
+	if utils.GetProvisioningMode(&js) == utils.SliceProvisioningModeSync {
+		if err := r.handleSyncMode(ctx, &js, desiredSlices, existingSliceList.Items); err != nil {
+			return ctrl.Result{}, fmt.Errorf("handling sync mode: %w", err)
+		}
+	}
+
 	// Requeue in order to recreate.
 	// NOTE: This should happen via an automatic re-reconcile after the DELETE, but
 	// in integration tests it appears not to happen.
@@ -160,14 +165,13 @@ func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&jobset.JobSet{}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
-			js, ok := object.(*jobset.JobSet)
-			if !ok {
-				return false
+			if js, ok := object.(*jobset.JobSet); ok {
+				accels := acceleratorsForJobSet(js)
+				return utils.SliceProvisioningEnabled(js) &&
+					!utils.AutoProvisioningDisabledForJobSet(js) &&
+					(accels[tpu7xAccelerator] || accels[tpuV7xAccelerator])
 			}
-			accels := acceleratorsForJobSet(js)
-			return sliceProvisioningEnabled(js) &&
-				!autoProvisioningDisabledForJobSet(js) &&
-				(accels[tpu7xAccelerator] || accels[tpuV7xAccelerator])
+			return true
 		})).
 		Watches(
 			&v1alpha1.Slice{},
@@ -326,4 +330,87 @@ func diffSlices(desired []v1alpha1.Slice, existing []v1alpha1.Slice) (toDelete, 
 	}
 
 	return toDelete, toCreate
+}
+
+// handleSyncMode handles the sync provisioning mode by suspending the JobSet
+// until all expected Slices are Ready, then unsuspending it.
+func (r *SliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet, desiredSlices []v1alpha1.Slice, existingSlices []v1alpha1.Slice) error {
+	log := ctrllog.FromContext(ctx)
+
+	allReady := allSlicesReady(desiredSlices, existingSlices)
+	currentlySuspended := js.Spec.Suspend != nil && *js.Spec.Suspend
+
+	if allReady && currentlySuspended {
+		// All slices are ready, unsuspend the JobSet
+		log.Info("All Slices are Ready, unsuspending JobSet")
+		suspendValue := false
+		js.Spec.Suspend = &suspendValue
+		if err := r.Update(ctx, js); err != nil {
+			return fmt.Errorf("unsuspending jobset: %w", err)
+		}
+		r.Recorder.Event(js, "Normal", "Unsuspended", "All Slices are Ready")
+	} else if !allReady && !currentlySuspended {
+		// Not all slices are ready, suspend the JobSet
+		log.Info("Not all Slices are Ready, suspending JobSet",
+			"readyCount", countReadySlices(existingSlices),
+			"expectedCount", len(desiredSlices))
+		suspendValue := true
+		js.Spec.Suspend = &suspendValue
+		if err := r.Update(ctx, js); err != nil {
+			return fmt.Errorf("suspending jobset: %w", err)
+		}
+		r.Recorder.Event(js, "Normal", "Suspended", "Waiting for all Slices to be Ready")
+	}
+
+	return nil
+}
+
+// allSlicesReady checks if all desired Slices exist and have the Ready condition set to true.
+func allSlicesReady(desiredSlices []v1alpha1.Slice, existingSlices []v1alpha1.Slice) bool {
+	if len(desiredSlices) == 0 {
+		return true
+	}
+
+	// Create a map of existing slices by name for quick lookup
+	existingMap := make(map[string]*v1alpha1.Slice)
+	for i := range existingSlices {
+		existingMap[existingSlices[i].Name] = &existingSlices[i]
+	}
+
+	// Check that all desired slices exist and are Ready
+	for _, desired := range desiredSlices {
+		existing, exists := existingMap[desired.Name]
+		if !exists {
+			// Slice doesn't exist yet
+			return false
+		}
+		if !isSliceReady(existing) {
+			// Slice exists but is not Ready
+			return false
+		}
+	}
+
+	return true
+}
+
+// isSliceReady checks if a Slice has the Ready condition set to true.
+func isSliceReady(slice *v1alpha1.Slice) bool {
+	for _, condition := range slice.Status.Conditions {
+		if condition.Type == v1alpha1.SliceStateConditionType &&
+			condition.Status == metav1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// countReadySlices returns the number of Slices that have the Ready condition set to true.
+func countReadySlices(slices []v1alpha1.Slice) int {
+	count := 0
+	for i := range slices {
+		if isSliceReady(&slices[i]) {
+			count++
+		}
+	}
+	return count
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -71,7 +72,7 @@ var _ = Describe("Slice controller", func() {
 		// Test cases.
 		Entry("JobSet with slice provisioning enabled and v7x accelerator should create Slices", &testCase{
 			jobSet: constructJobSet("test-js-1",
-				withAnnotation(controller.SliceProvisioningLabel, "true"),
+				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 			),
 			wantSliceCreation: true,
@@ -88,7 +89,7 @@ var _ = Describe("Slice controller", func() {
 		}),
 		Entry("JobSet with slice provisioning enabled but no v7x accelerator should not create Slices", &testCase{
 			jobSet: constructJobSet("test-js-2",
-				withAnnotation(controller.SliceProvisioningLabel, "true"),
+				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu-v6e", "2x2x4")),
 			),
 			wantSliceCreation: false,
@@ -101,15 +102,15 @@ var _ = Describe("Slice controller", func() {
 		}),
 		Entry("JobSet with slice provisioning but auto-provisioning disabled should not create Slices", &testCase{
 			jobSet: constructJobSet("test-js-4",
-				withAnnotation(controller.SliceProvisioningLabel, "true"),
-				withAnnotation(controller.DisableAutoProvisioningLabel, "true"),
+				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
+				withLabel(utils.DisableAutoProvisioningLabel, "true"),
 				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 			),
 			wantSliceCreation: false,
 		}),
 		Entry("JobSet with slice provisioning and multiple replicas should create multiple Slices", &testCase{
 			jobSet: constructJobSet("test-js-5",
-				withAnnotation(controller.SliceProvisioningLabel, "true"),
+				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 				withReplicatedJob("worker", 3, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 			),
 			wantSliceCreation: true,
@@ -126,7 +127,7 @@ var _ = Describe("Slice controller", func() {
 		}),
 		Entry("JobSet with slice provisioning and 2 replicated jobs should create Slices for both", &testCase{
 			jobSet: constructJobSet("test-js-6",
-				withAnnotation(controller.SliceProvisioningLabel, "true"),
+				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 				withReplicatedJob("worker-1", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 				withReplicatedJob("worker-2", 1, makeJobTemplateWithTPU("tpu7x", "2x2x2")),
 			),
@@ -152,7 +153,7 @@ var _ = Describe("Slice controller", func() {
 		}),
 		Entry("JobSet with slice-selection annotation should create Slices with PartitionIds", &testCase{
 			jobSet: constructJobSet("test-js-7",
-				withAnnotation(controller.SliceProvisioningLabel, "true"),
+				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 				withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-1","cube-2"],["cube-3","cube-4"]]}`),
 				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 			),
@@ -195,7 +196,7 @@ var _ = Describe("Slice controller", func() {
 
 		// Create JobSet with initial slice selection
 		js := constructJobSet("test-js-update",
-			withAnnotation(controller.SliceProvisioningLabel, "true"),
+			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-1","cube-2"]]}`),
 			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 		)
@@ -257,7 +258,7 @@ var _ = Describe("Slice controller", func() {
 
 		// Create JobSet with slice provisioning
 		js := constructJobSet("test-js-deletion",
-			withAnnotation(controller.SliceProvisioningLabel, "true"),
+			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
 		)
 		js.Namespace = ns.Name
@@ -303,6 +304,137 @@ var _ = Describe("Slice controller", func() {
 			return count
 		}, 10*time.Second, time.Second).Should(Equal(0))
 	})
+
+	It("should suspend JobSet in sync mode until all Slices are Ready", func() {
+		ctx := context.Background()
+		// Create test namespace
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-ns-",
+			},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+		// Clean up temporary namespace after test
+		defer func() {
+			Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
+		}()
+
+		// Create JobSet with sync mode slice provisioning
+		js := constructJobSet("test-js-sync",
+			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeSync),
+			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+		)
+		js.Namespace = ns.Name
+
+		By("Creating JobSet with sync mode")
+		Expect(k8sClient.Create(ctx, js)).To(Succeed())
+
+		By("Verifying Slices are created")
+		expectedSlices := []ExpectedSliceSpec{
+			{
+				SliceSpec: v1alpha1.SliceSpec{
+					Type:         "tpu7x",
+					Topology:     "2x2x4",
+					PartitionIds: nil,
+				},
+				Replicas: 2,
+			},
+		}
+		assertSlicesCreated(ctx, js, expectedSlices)
+
+		By("Verifying JobSet is suspended because Slices are not Ready")
+		Eventually(func() bool {
+			var updatedJS jobset.JobSet
+			err := k8sClient.Get(ctx, client.ObjectKeyFromObject(js), &updatedJS)
+			if err != nil {
+				return false
+			}
+			return updatedJS.Spec.Suspend != nil && *updatedJS.Spec.Suspend
+		}, 5*time.Second, time.Second).Should(BeTrue())
+
+		By("Marking all Slices as Ready")
+		var sliceList v1alpha1.SliceList
+		err := k8sClient.List(ctx, &sliceList,
+			client.MatchingLabels{
+				controller.SliceOwnerKindLabel:      "jobset",
+				controller.SliceOwnerNameLabel:      js.Name,
+				controller.SliceOwnerNamespaceLabel: js.Namespace,
+			})
+		Expect(err).ToNot(HaveOccurred())
+		for _, slice := range sliceList.Items {
+			slice.Status.Conditions = []metav1.Condition{
+				{
+					Type:               v1alpha1.SliceStateConditionType,
+					Status:             metav1.ConditionTrue,
+					Reason:             "Ready",
+					Message:            "Slice is ready",
+					LastTransitionTime: metav1.Now(),
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, &slice)).To(Succeed())
+		}
+
+		By("Verifying JobSet is unsuspended after all Slices are Ready")
+		Eventually(func() bool {
+			var updatedJS jobset.JobSet
+			err := k8sClient.Get(ctx, client.ObjectKeyFromObject(js), &updatedJS)
+			if err != nil {
+				return true // Return true to fail the test if we can't get the JobSet
+			}
+			return updatedJS.Spec.Suspend == nil || !*updatedJS.Spec.Suspend
+		}, 5*time.Second, time.Second).Should(BeTrue())
+	})
+
+	It("should not suspend JobSet in async mode", func() {
+		ctx := context.Background()
+		// Create test namespace
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-ns-",
+			},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+		// Clean up temporary namespace after test
+		defer func() {
+			Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
+		}()
+
+		// Create JobSet with async mode slice provisioning
+		js := constructJobSet("test-js-async",
+			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
+			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+		)
+		js.Namespace = ns.Name
+
+		By("Creating JobSet with async mode")
+		Expect(k8sClient.Create(ctx, js)).To(Succeed())
+
+		By("Verifying Slices are created")
+		expectedSlices := []ExpectedSliceSpec{
+			{
+				SliceSpec: v1alpha1.SliceSpec{
+					Type:         "tpu7x",
+					Topology:     "2x2x4",
+					PartitionIds: nil,
+				},
+				Replicas: 2,
+			},
+		}
+		assertSlicesCreated(ctx, js, expectedSlices)
+
+		By("Verifying JobSet remains unsuspended in async mode")
+		Consistently(func() bool {
+			var updatedJS jobset.JobSet
+			err := k8sClient.Get(ctx, client.ObjectKeyFromObject(js), &updatedJS)
+			if err != nil {
+				return true // Return true to fail the test if we can't get the JobSet
+			}
+			// JobSet should remain unsuspended (nil or false)
+			return updatedJS.Spec.Suspend == nil || !*updatedJS.Spec.Suspend
+		}, 3*time.Second, time.Second).Should(BeTrue())
+	})
 })
 
 // JobSetOption is a function that modifies a JobSet.
@@ -334,6 +466,16 @@ func withAnnotation(key, value string) JobSetOption {
 			js.Annotations = make(map[string]string)
 		}
 		js.Annotations[key] = value
+	}
+}
+
+// withLabel adds a label to the JobSet.
+func withLabel(key, value string) JobSetOption {
+	return func(js *jobset.JobSet) {
+		if js.Labels == nil {
+			js.Labels = make(map[string]string)
+		}
+		js.Labels[key] = value
 	}
 }
 

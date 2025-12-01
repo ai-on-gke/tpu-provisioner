@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -37,9 +38,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
-
-// When this pod label is set to "true", the TPU provisioner will not reconcile the pod.
-const DisableAutoProvisioningLabel = "tpu-provisioner.cloud.google.com/disable-autoprovisioning"
 
 // CreationReconciler watches Pods and creates Node Pools.
 type CreationReconciler struct {
@@ -88,8 +86,8 @@ func (r *CreationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			pod.Namespace, pod.Name,
 			err)
 	}
-	if sliceProvisioningEnabled(&js) {
-		lg.Info("ignoring nodepool autoprovisioning since slice provisioning is enabled", "label", SliceProvisioningLabel)
+	if utils.SliceProvisioningEnabled(&js) {
+		lg.Info("ignoring nodepool autoprovisioning since slice provisioning is enabled", "label", utils.SliceProvisioningLabel)
 		return ctrl.Result{}, nil
 	}
 
@@ -130,7 +128,7 @@ func (r *CreationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				isUnschedulable(pod) &&
 				doesRequestResource(pod, r.PodCriteria.ResourceType) &&
 				hasNodeSelectors(pod, cloud.GKETPUNodeSelector) &&
-				!autoProvisioningDisabled(pod) &&
+				!utils.AutoProvisioningDisabled(pod) &&
 				!podDeleted(pod)
 		})).
 		Complete(r)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -13,8 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
 )
 
 // +kubebuilder:docs-gen:collapse=Imports
@@ -107,7 +106,7 @@ func makeFollowerPod() *corev1.Pod {
 
 func makeLeaderPodAutoProvisioningDisabled() *corev1.Pod {
 	leaderPod := makeLeaderPod()
-	leaderPod.Annotations[controller.DisableAutoProvisioningLabel] = "true"
+	leaderPod.Annotations[utils.DisableAutoProvisioningLabel] = "true"
 	return leaderPod
 }
 
