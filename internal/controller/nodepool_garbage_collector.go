@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
@@ -50,6 +51,11 @@ func (g *NodePoolGarbageCollector) Run(ctx context.Context) {
 				"createdForJobSetName", np.CreatedForJobSet.Name,
 				"createdForJobSetNamespace", np.CreatedForJobSet.Namespace,
 			)
+
+			if strings.HasPrefix(np.Name, "static-") {
+				log.Info("skipping garbage collection of static node pool")
+				continue
+			}
 
 			if !np.Error {
 				continue

@@ -12,17 +12,115 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/google/go-cmp/cmp"
+	computev1 "google.golang.org/api/compute/v1"
 	container "google.golang.org/api/container/v1beta1"
 	"google.golang.org/api/googleapi"
 	"k8s.io/apimachinery/pkg/api/resource"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
-func TestEnsureNodePoolForPod(t *testing.T) {
-	svc := &mockGKEService{
+type mockReservationService struct {
+	reservations map[string]*computev1.Reservation
+}
+
+func (m *mockReservationService) GetReservation(ctx context.Context, name string) (*computev1.Reservation, error) {
+	r, ok := m.reservations[name]
+	if !ok {
+		return nil, &googleapi.Error{Code: http.StatusNotFound}
+	}
+	return r, nil
+}
+
+func TestStaticallyProvisionNodePools(t *testing.T) {
+	gke, svc, reservationsSvc := newTestGKE(t)
+
+	reservations := []string{"res-1", "res-2"}
+	reservationsSvc.reservations["res-1"] = &computev1.Reservation{
+		Name: "res-1",
+		SpecificReservation: &computev1.AllocationSpecificSKUReservation{
+			InstanceProperties: &computev1.AllocationSpecificSKUAllocationReservedInstanceProperties{
+				GuestAccelerators: []*computev1.AcceleratorConfig{
+					{
+						AcceleratorCount: 64,
+						AcceleratorType:  "tpu-v5-lite-podslice",
+					},
+				},
+			},
+		},
+	}
+	reservationsSvc.reservations["res-2"] = &computev1.Reservation{
+		Name: "res-2",
+		SpecificReservation: &computev1.AllocationSpecificSKUReservation{
+			InstanceProperties: &computev1.AllocationSpecificSKUAllocationReservedInstanceProperties{
+				GuestAccelerators: []*computev1.AcceleratorConfig{
+					{
+						AcceleratorCount: 64,
+						AcceleratorType:  "tpu-v5-lite-podslice",
+					},
+				},
+			},
+		},
+	}
+
+	// First call, should create both node pools.
+	if err := gke.StaticallyProvisionNodePools(context.Background(), reservations); err != nil {
+		t.Fatalf("StaticallyProvisionNodePools(): %v", err)
+	}
+
+	if got := len(svc.nodePools); got != 2 {
+		t.Fatalf("expected 2 node pools, got %d", got)
+	}
+	if got := svc.creates["static-res-1-0"]; got != 1 {
+		t.Errorf("expected 1 create for static-res-1-0, got %d", got)
+	}
+	if got := svc.creates["static-res-2-0"]; got != 1 {
+		t.Errorf("expected 1 create for static-res-2-0, got %d", got)
+	}
+
+	np1 := svc.nodePools["static-res-1-0"]
+	if np1 == nil {
+		t.Fatal("nodepool static-res-1-0 not found")
+	}
+	if got, want := np1.Config.MachineType, "tpu7x-standard-4t"; got != want {
+		t.Errorf("got machine type %q, want %q", got, want)
+	}
+	if got, want := np1.InitialNodeCount, int64(16); got != want {
+		t.Errorf("got initial node count %d, want %d", got, want)
+	}
+	if got, want := np1.Config.Labels[LabelProvisionerNodepoolID], "res-1-0"; got != want {
+		t.Errorf("got label %q, want %q", got, want)
+	}
+
+	// Second call, should not create any new node pools.
+	if err := gke.StaticallyProvisionNodePools(context.Background(), reservations); err != nil {
+		t.Fatalf("StaticallyProvisionNodePools(): %v", err)
+	}
+	if got := svc.creates["static-res-1-0"]; got != 1 {
+		t.Errorf("expected 1 create for static-res-1-0, got %d", got)
+	}
+	if got := svc.creates["static-res-2-0"]; got != 1 {
+		t.Errorf("expected 1 create for static-res-2-0, got %d", got)
+	}
+
+	// Modify a node pool and call again, should not create a new one.
+	np1.Config.MachineType = "different"
+	if err := gke.StaticallyProvisionNodePools(context.Background(), reservations); err != nil {
+		t.Fatalf("StaticallyProvisionNodePools(): %v", err)
+	}
+	if got := svc.creates["static-res-1-0"]; got != 1 {
+		t.Errorf("expected 1 create for static-res-1-0, got %d", got)
+	}
+}
+
+func newTestGKE(t *testing.T) (*GKE, *mockGKEService, *mockReservationService) {
+	t.Helper()
+	gkeSvc := &mockGKEService{
 		creates:   make(map[string]int),
 		deletes:   make(map[string]int),
 		nodePools: make(map[string]*container.NodePool),
+	}
+	reservationSvc := &mockReservationService{
+		reservations: make(map[string]*computev1.Reservation),
 	}
 	clusterCtx := GKEContext{
 		ProjectID:              "test-project",
@@ -39,10 +137,16 @@ func TestEnsureNodePoolForPod(t *testing.T) {
 	}
 	rec := &mockEventRecorder{}
 	gke := &GKE{
-		NodePools:      svc,
+		NodePools:      gkeSvc,
+		Reservations:   reservationSvc,
 		ClusterContext: clusterCtx,
 		Recorder:       rec,
 	}
+	return gke, gkeSvc, reservationSvc
+}
+
+func TestEnsureNodePoolForPod(t *testing.T) {
+	gke, svc, _ := newTestGKE(t)
 
 	cases := []struct {
 		name          string

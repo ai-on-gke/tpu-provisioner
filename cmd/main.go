@@ -39,6 +39,7 @@ import (
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
 
+	computev1 "google.golang.org/api/compute/v1"
 	containerv1beta1 "google.golang.org/api/container/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -102,6 +103,8 @@ func main() {
 
 		PodResourceType string `envconfig:"POD_RESOURCE_TYPE" default:"google.com/tpu"`
 
+		StaticProvisionReservations string `envconfig:"STATIC_PROVISION_RESERVATIONS" default:""`
+
 		Concurrency int `envconfig:"CONCURRENCY" default:"3"`
 	}
 	envconfig.MustProcess("", &cfg)
@@ -149,6 +152,7 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+	ctx := ctrl.SetupSignalHandler()
 
 	var provider cloud.Provider
 	switch p := strings.ToLower(cfg.Provider); p {
@@ -225,10 +229,31 @@ func main() {
 			Service:        containers,
 		}
 
-		provider = &cloud.GKE{
+		compute, err := computev1.NewService(context.Background())
+		if err != nil {
+			setupLog.Error(err, "unable to create compute client")
+			os.Exit(1)
+		}
+		reservationsProvider := &cloud.ReservationProvider{
+			Service:   compute,
+			ProjectID: cfg.GCPProjectID,
+			Zone:      cfg.GCPZone,
+		}
+
+		gkeProvider := &cloud.GKE{
 			NodePools:      nodePoolsService,
+			Reservations:   reservationsProvider,
 			ClusterContext: clusterCtx,
 			Recorder:       mgr.GetEventRecorderFor("tpu-provisioner"),
+		}
+		provider = gkeProvider
+
+		if cfg.StaticProvisionReservations != "" {
+			reservations := strings.Split(cfg.StaticProvisionReservations, ",")
+			if err := gkeProvider.StaticallyProvisionNodePools(ctx, reservations); err != nil {
+				setupLog.Error(err, "unable to statically provision nodepools")
+				// We don't exit here, as we want the dynamic provisioner to continue running.
+			}
 		}
 	case "mock":
 		provider = &cloud.Mock{}
@@ -275,7 +300,6 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
-	ctx := ctrl.SetupSignalHandler()
 
 	gc := &controller.NodePoolGarbageCollector{
 		Interval: time.Minute,

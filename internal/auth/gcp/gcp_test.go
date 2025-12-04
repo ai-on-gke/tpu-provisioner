@@ -115,7 +115,7 @@ func TestHelperProcess(t *testing.T) {
 		fmt.Fprintf(os.Stdout, "call cmd=%q got args %v, want: %v\n", gotCmd, gotArgs, output.args)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stdout, output.output)
+	fmt.Fprint(os.Stdout, output.output)
 	os.Exit(0)
 }
 

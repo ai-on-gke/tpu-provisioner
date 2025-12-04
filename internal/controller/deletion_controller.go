@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
@@ -95,6 +96,11 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	nodePoolName, ok := node.GetLabels()[nodePoolLabelKey]
 	if !ok {
 		lg.V(3).Info("No node pool label found on node, ignoring", "labelKey", nodePoolLabelKey)
+		return ctrl.Result{}, nil
+	}
+
+	if strings.HasPrefix(nodePoolName, "static-") {
+		// lg.Info("Skipping deletion of static node pool", "nodePoolName", nodePoolName)
 		return ctrl.Result{}, nil
 	}
 

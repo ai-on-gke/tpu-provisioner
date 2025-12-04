@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	computev1 "google.golang.org/api/compute/v1"
 	containerv1beta1 "google.golang.org/api/container/v1beta1"
 	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
@@ -69,15 +70,29 @@ const (
 
 var _ Provider = &GKE{}
 
+// GKE is a wrapper around the GKE API.
 type GKE struct {
-	NodePools      NodePoolService
+	NodePools      NodePoolAPI
+	Reservations   ReservationProviderAPI
 	ClusterContext GKEContext
+	Recorder       record.EventRecorder
 
-	Recorder record.EventRecorder
-
-	inProgressDeletesNPName sync.Map
 	inProgressCreatesNPName sync.Map
 	inProgressCreatesJobKey sync.Map
+	inProgressDeletesNPName sync.Map
+}
+
+// NodePoolAPI is an interface for a node pool provider.
+type NodePoolAPI interface {
+	Get(ctx context.Context, name string) (*containerv1beta1.NodePool, error)
+	List(ctx context.Context) (*containerv1beta1.ListNodePoolsResponse, error)
+	Create(ctx context.Context, req *containerv1beta1.CreateNodePoolRequest, callbacks OpCallbacks) error
+	Delete(ctx context.Context, name string, callbacks OpCallbacks) error
+}
+
+// ReservationProviderAPI is an interface for a reservation provider.
+type ReservationProviderAPI interface {
+	GetReservation(ctx context.Context, name string) (*computev1.Reservation, error)
 }
 
 func (g *GKE) NodePoolLabelKey() string { return GKENodePoolNameLabel }
@@ -174,23 +189,24 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 	}
 
 	for _, np := range resp.NodePools {
+		var createdForJobSet types.NamespacedName
 		jsName, exists := np.Config.Labels[LabelJobSetName]
-		if !exists {
-			jsName = np.Config.Labels[LabelProvisionerNodepoolID]
-		}
-		jsNamespace, exists := np.Config.Labels[LabelJobSetNamespace]
-		if !exists {
-			jsNamespace = "default"
+		if exists {
+			jsNamespace, exists := np.Config.Labels[LabelJobSetNamespace]
+			if !exists {
+				jsNamespace = "default"
+			}
+			createdForJobSet = types.NamespacedName{
+				Name:      jsName,
+				Namespace: jsNamespace,
+			}
 		}
 
 		refs = append(refs, NodePoolRef{
-			Name:    np.Name,
-			Error:   np.Status == "ERROR",
-			Message: np.StatusMessage,
-			CreatedForJobSet: types.NamespacedName{
-				Name:      jsName,
-				Namespace: jsNamespace,
-			},
+			Name:             np.Name,
+			Error:            np.Status == "ERROR",
+			Message:          np.StatusMessage,
+			CreatedForJobSet: createdForJobSet,
 		})
 	}
 
@@ -266,7 +282,23 @@ const (
 )
 
 func (g *GKE) checkExistingNodePool(ctx context.Context, desired *containerv1beta1.NodePool) (nodePoolState, error) {
+	log.Info("checking existing node pool", "nodePoolName", desired.Name)
 	existing, err := g.NodePools.Get(ctx, desired.Name)
+	if err != nil {
+		// log.Error(err, "error getting node pool", "nodePoolName", desired.Name, "status code", err.Code)
+		// Check if the error is a googleapi.Error and get its code
+		if gerr, ok := err.(*googleapi.Error); ok {
+			log.Error(err, "error getting node pool", "nodePoolName", desired.Name, "errorCode", gerr.Code)
+		} else {
+			// Log the error without a specific code if it's not a googleapi.Error
+			log.Error(err, "error getting node pool", "nodePoolName", desired.Name)
+		}
+	}
+
+	if existing != nil {
+		log.Info("got existing node pool", "nodePoolName", desired.Name, "nodePool", existing)
+	}
+
 	if err == nil {
 		match, err := nodePoolHashesMatch(desired, existing)
 		if err != nil {
@@ -281,7 +313,7 @@ func (g *GKE) checkExistingNodePool(ctx context.Context, desired *containerv1bet
 	if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
 		return nodePoolStateNotExists, nil
 	}
-	if existing.Status == "STOPPING" {
+	if existing != nil && existing.Status == "STOPPING" {
 		return nodePoolStateExistsAndStopping, nil
 	}
 
@@ -658,6 +690,188 @@ func getAnnotation(p *corev1.Pod, key string) string {
 		return ""
 	}
 	return p.Annotations[key]
+}
+
+// StaticallyProvisionNodePools provisions node pools from a list of reservations.
+func (g *GKE) StaticallyProvisionNodePools(ctx context.Context, reservations []string) error {
+	log.Info("statically provisioning node pools for reservations", "reservations", reservations)
+	for _, reservationName := range reservations {
+		reservation, err := g.Reservations.GetReservation(ctx, reservationName)
+		if err != nil {
+			return fmt.Errorf("getting reservation %s: %w", reservationName, err)
+		}
+
+		if reservation == nil {
+			log.Info("reservation not found, skipping", "reservationName", reservationName)
+			continue
+		}
+
+		var chipCount int64
+		// Check for specific reservation properties
+		if reservation.SpecificReservation != nil &&
+			reservation.SpecificReservation.InstanceProperties != nil &&
+			len(reservation.SpecificReservation.InstanceProperties.GuestAccelerators) > 0 {
+			chipCount = reservation.SpecificReservation.InstanceProperties.GuestAccelerators[0].AcceleratorCount
+		} else if reservation.AggregateReservation != nil &&
+			len(reservation.AggregateReservation.ReservedResources) > 0 &&
+			reservation.AggregateReservation.ReservedResources[0].Accelerator != nil {
+			// This logic is based on the user's instruction that an AggregateReservation field exists.
+			chipCount = reservation.AggregateReservation.ReservedResources[0].Accelerator.AcceleratorCount
+		} else {
+			log.Info("reservation has no supported specific or aggregate reservation properties with accelerators, skipping", "reservationName", reservationName)
+			continue
+		}
+
+		if chipCount == 0 {
+			log.Info("could not determine chip count from reservation, skipping", "reservationName", reservationName)
+			continue
+		}
+
+		subBlockCount := chipCount / 64
+
+		for i := 0; i < int(subBlockCount); i++ {
+			nodePoolID := fmt.Sprintf("%s-%d", reservationName, i)
+			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName)
+			if err != nil {
+				return fmt.Errorf("determining node pool for static reservation: %w", err)
+			}
+			log.Info("determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
+
+			existingNPState, err := g.checkExistingNodePool(ctx, np)
+			log.Info("got existing node pool state", "existingNPState", existingNPState, "err", err)
+			if err != nil {
+				return fmt.Errorf("checking if node pool exists: %w", err)
+			}
+			log.Info("Checked existing static node pool state",
+				"nodePoolName", np.Name, "existingNodePoolState", existingNPState.String(),
+			)
+
+			switch existingNPState {
+			case nodePoolStateExistsAndMatches:
+				log.Info("node pool already exists and matches, skipping creation", "nodePoolName", np.Name)
+				continue
+			case nodePoolStateExistsAndNotMatches:
+				log.Info("node pool exists but does not match, recreating", "nodePoolName", np.Name)
+				// TODO: Decide if we want to support recreation of static node pools.
+				// For now, we will just log and continue.
+				log.Info("recreation of static node pools is not yet supported", "nodePoolName", np.Name)
+				continue
+			case nodePoolStateExistsAndStopping:
+				log.Info("node pool is stopping, skipping creation", "nodePoolName", np.Name)
+				continue
+			}
+
+			req := &containerv1beta1.CreateNodePoolRequest{
+				NodePool: np,
+				Parent:   g.ClusterContext.ClusterName(),
+			}
+
+			log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
+			if err := g.NodePools.Create(context.TODO(), req, OpCallbacks{
+				ReqFailure: func(err error) {
+					log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
+				},
+				OpFailure: func(err error) {
+					log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
+				},
+				Success: func() {
+					log.Info("successfully created static node pool", "nodePoolName", np.Name)
+				},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume string) (*containerv1beta1.NodePool, error) {
+	labels := map[string]string{
+		LabelNodepoolManager:       LabelNodepoolManagerTPUPodinator,
+		LabelProvisionerNodepoolID: nodePoolID,
+	}
+
+	reservation := &containerv1beta1.ReservationAffinity{
+		ConsumeReservationType: "SPECIFIC_RESERVATION",
+		Key:                    "compute.googleapis.com/reservation-name",
+		Values: []string{
+			reservationToConsume,
+		},
+	}
+
+	nodeCount := 16
+	machineType := "tpu7x-standard-4t"
+	accelerator := V7xSliceAccelerator
+	topology := "4x4x4"
+
+	var taints []*containerv1beta1.NodeTaint
+
+	var secondaryDisks []*containerv1beta1.SecondaryBootDisk
+	if g.ClusterContext.NodeSecondaryDisk != "" {
+		secondaryDisks = []*containerv1beta1.SecondaryBootDisk{
+			{
+				DiskImage: g.ClusterContext.NodeSecondaryDisk,
+				Mode:      "CONTAINER_IMAGE_CACHE",
+			},
+		}
+	}
+
+	placementPolicy := &containerv1beta1.PlacementPolicy{}
+	if accelerator == V7xSliceAccelerator {
+		placementPolicy.PolicyName = fmt.Sprintf("tpu-provisioner-%v", topology)
+	} else {
+		placementPolicy.TpuTopology = topology
+		placementPolicy.Type = "COMPACT"
+	}
+
+	var diskType string
+	if g.ClusterContext.NodeDiskType != "" {
+		diskType = g.ClusterContext.NodeDiskType
+	}
+
+	// Nodepool name must be <= 40 characters.
+	name := fmt.Sprintf("static-%s", nodePoolID)
+	if len(name) > 40 {
+		name = name[:40]
+	}
+
+	np := &containerv1beta1.NodePool{
+		Name: name,
+		Config: &containerv1beta1.NodeConfig{
+			ServiceAccount: g.ClusterContext.NodeServiceAccount,
+			ShieldedInstanceConfig: &containerv1beta1.ShieldedInstanceConfig{
+				EnableIntegrityMonitoring: true,
+				EnableSecureBoot:          g.ClusterContext.NodeSecureBoot,
+			},
+			Tags:                      g.ClusterContext.NodeTags,
+			SecondaryBootDisks:        secondaryDisks,
+			MachineType:               machineType,
+			ReservationAffinity:       reservation,
+			Labels:                    labels,
+			Taints:                    taints,
+			BootDiskKmsKey:            g.ClusterContext.NodeBootDiskKMSKey,
+			DiskType:                  diskType,
+			EnableConfidentialStorage: g.ClusterContext.NodeConfidentialStorage,
+		},
+		InitialNodeCount: int64(nodeCount),
+		Locations:        []string{g.ClusterContext.NodeZone},
+		PlacementPolicy:  placementPolicy,
+		Management: &containerv1beta1.NodeManagement{
+			AutoRepair:  true,
+			AutoUpgrade: false,
+		},
+		UpgradeSettings: &containerv1beta1.UpgradeSettings{
+			MaxSurge: 1,
+		},
+		MaxPodsConstraint: &containerv1beta1.MaxPodsConstraint{MaxPodsPerNode: maxPodsPerNode},
+	}
+
+	hash, err := nodePoolSelectiveHash(np)
+	if err != nil {
+		return nil, fmt.Errorf("hashing node pool: %w", err)
+	}
+	np.Config.Labels[LabelNodePoolHash] = hash
+	return np, nil
 }
 
 // nodePoolSelectiveHash attempts to hash information specific to workload requirements.
