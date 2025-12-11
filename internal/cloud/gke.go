@@ -70,9 +70,8 @@ const (
 
 var _ Provider = &GKE{}
 
-// GKE is a wrapper around the GKE API.
 type GKE struct {
-	NodePools      NodePoolAPI
+	NodePools      NodePoolService
 	Reservations   ReservationProviderAPI
 	ClusterContext GKEContext
 	Recorder       record.EventRecorder
@@ -82,15 +81,6 @@ type GKE struct {
 	inProgressDeletesNPName sync.Map
 }
 
-// NodePoolAPI is an interface for a node pool provider.
-type NodePoolAPI interface {
-	Get(ctx context.Context, name string) (*containerv1beta1.NodePool, error)
-	List(ctx context.Context) (*containerv1beta1.ListNodePoolsResponse, error)
-	Create(ctx context.Context, req *containerv1beta1.CreateNodePoolRequest, callbacks OpCallbacks) error
-	Delete(ctx context.Context, name string, callbacks OpCallbacks) error
-}
-
-// ReservationProviderAPI is an interface for a reservation provider.
 type ReservationProviderAPI interface {
 	GetReservation(ctx context.Context, name string) (*computev1.Reservation, error)
 }
@@ -103,7 +93,7 @@ func (g *GKE) EnsureNodePoolForPod(p *corev1.Pod, why string) error {
 		return fmt.Errorf("determining node pool for pod: %w", err)
 	}
 
-	existingNPState, err := g.checkExistingNodePool(context.TODO(), np)
+	existingNPState, err := g.checkExistingNodePoolState(context.TODO(), np)
 	if err != nil {
 		return fmt.Errorf("checking if node pool exists: %w", err)
 	}
@@ -281,23 +271,8 @@ const (
 	nodePoolStateExistsAndStopping
 )
 
-func (g *GKE) checkExistingNodePool(ctx context.Context, desired *containerv1beta1.NodePool) (nodePoolState, error) {
-	log.Info("checking existing node pool", "nodePoolName", desired.Name)
+func (g *GKE) checkExistingNodePoolState(ctx context.Context, desired *containerv1beta1.NodePool) (nodePoolState, error) {
 	existing, err := g.NodePools.Get(ctx, desired.Name)
-	if err != nil {
-		// log.Error(err, "error getting node pool", "nodePoolName", desired.Name, "status code", err.Code)
-		// Check if the error is a googleapi.Error and get its code
-		if gerr, ok := err.(*googleapi.Error); ok {
-			log.Error(err, "error getting node pool", "nodePoolName", desired.Name, "errorCode", gerr.Code)
-		} else {
-			// Log the error without a specific code if it's not a googleapi.Error
-			log.Error(err, "error getting node pool", "nodePoolName", desired.Name)
-		}
-	}
-
-	if existing != nil {
-		log.Info("got existing node pool", "nodePoolName", desired.Name, "nodePool", existing)
-	}
 
 	if err == nil {
 		match, err := nodePoolHashesMatch(desired, existing)
@@ -318,6 +293,16 @@ func (g *GKE) checkExistingNodePool(ctx context.Context, desired *containerv1bet
 	}
 
 	return nodePoolStateUnknown, err
+}
+
+func (g *GKE) checkNodePoolExists(ctx context.Context, desired *containerv1beta1.NodePool) (bool, error) {
+	existing, err := g.NodePools.Get(ctx, desired.Name)
+
+	if existing == nil {
+		return false, nil
+	}
+
+	return true, err
 }
 
 func nodePoolHashesMatch(desired, existing *containerv1beta1.NodePool) (bool, error) {
@@ -737,48 +722,34 @@ func (g *GKE) StaticallyProvisionNodePools(ctx context.Context, reservations []s
 			}
 			log.Info("determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
 
-			existingNPState, err := g.checkExistingNodePool(ctx, np)
-			log.Info("got existing node pool state", "existingNPState", existingNPState, "err", err)
+			npExists, err := g.checkNodePoolExists(ctx, np)
 			if err != nil {
 				return fmt.Errorf("checking if node pool exists: %w", err)
 			}
-			log.Info("Checked existing static node pool state",
-				"nodePoolName", np.Name, "existingNodePoolState", existingNPState.String(),
+			log.Info("Checked whether static node pool already exists",
+				"nodePoolName", np.Name, "existingNodePoolState", npExists,
 			)
 
-			switch existingNPState {
-			case nodePoolStateExistsAndMatches:
-				log.Info("node pool already exists and matches, skipping creation", "nodePoolName", np.Name)
-				continue
-			case nodePoolStateExistsAndNotMatches:
-				log.Info("node pool exists but does not match, recreating", "nodePoolName", np.Name)
-				// TODO: Decide if we want to support recreation of static node pools.
-				// For now, we will just log and continue.
-				log.Info("recreation of static node pools is not yet supported", "nodePoolName", np.Name)
-				continue
-			case nodePoolStateExistsAndStopping:
-				log.Info("node pool is stopping, skipping creation", "nodePoolName", np.Name)
-				continue
-			}
+			if !npExists {
+				req := &containerv1beta1.CreateNodePoolRequest{
+					NodePool: np,
+					Parent:   g.ClusterContext.ClusterName(),
+				}
 
-			req := &containerv1beta1.CreateNodePoolRequest{
-				NodePool: np,
-				Parent:   g.ClusterContext.ClusterName(),
-			}
-
-			log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
-			if err := g.NodePools.Create(context.TODO(), req, OpCallbacks{
-				ReqFailure: func(err error) {
-					log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
-				},
-				OpFailure: func(err error) {
-					log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
-				},
-				Success: func() {
-					log.Info("successfully created static node pool", "nodePoolName", np.Name)
-				},
-			}); err != nil {
-				return err
+				log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
+				if err := g.NodePools.Create(ctx, req, OpCallbacks{
+					ReqFailure: func(err error) {
+						log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
+					},
+					OpFailure: func(err error) {
+						log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
+					},
+					Success: func() {
+						log.Info("successfully created static node pool", "nodePoolName", np.Name)
+					},
+				}); err != nil {
+					return err
+				}
 			}
 		}
 	}
