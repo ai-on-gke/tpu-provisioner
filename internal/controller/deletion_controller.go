@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
@@ -99,7 +98,7 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	if strings.HasPrefix(nodePoolName, "static-") {
+	if IsStaticNodePool(nodePoolName) {
 		// lg.Info("Skipping deletion of static node pool", "nodePoolName", nodePoolName)
 		return ctrl.Result{}, nil
 	}

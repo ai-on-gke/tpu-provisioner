@@ -677,79 +677,77 @@ func getAnnotation(p *corev1.Pod, key string) string {
 	return p.Annotations[key]
 }
 
-// StaticallyProvisionNodePools provisions node pools from a list of reservations.
-func (g *GKE) StaticallyProvisionNodePools(ctx context.Context, reservations []string) error {
-	log.Info("statically provisioning node pools for reservations", "reservations", reservations)
-	for _, reservationName := range reservations {
-		reservation, err := g.Reservations.GetReservation(ctx, reservationName)
+// EnsureStaticNodePool provisions a node pool for a given reservation.
+func (g *GKE) EnsureStaticNodePool(ctx context.Context, reservationName string) error {
+	log.Info("Ensuring static nodepool for reservation", "reservationName", reservationName)
+	reservation, err := g.Reservations.GetReservation(ctx, reservationName)
+	if err != nil {
+		return fmt.Errorf("getting reservation %s: %w", reservationName, err)
+	}
+
+	if reservation == nil {
+		log.Info("Reservation not found, skipping", "reservationName", reservationName)
+		return nil
+	}
+
+	var chipCount int64
+	// Check for specific reservation properties
+	if reservation.SpecificReservation != nil &&
+		reservation.SpecificReservation.InstanceProperties != nil &&
+		len(reservation.SpecificReservation.InstanceProperties.GuestAccelerators) > 0 {
+		chipCount = reservation.SpecificReservation.InstanceProperties.GuestAccelerators[0].AcceleratorCount
+	} else if reservation.AggregateReservation != nil &&
+		len(reservation.AggregateReservation.ReservedResources) > 0 &&
+		reservation.AggregateReservation.ReservedResources[0].Accelerator != nil {
+		// This logic is based on the user's instruction that an AggregateReservation field exists.
+		chipCount = reservation.AggregateReservation.ReservedResources[0].Accelerator.AcceleratorCount
+	} else {
+		log.Info("Reservation has no supported specific or aggregate reservation properties with accelerators, skipping", "reservationName", reservationName)
+		return nil
+	}
+
+	if chipCount == 0 {
+		log.Info("Could not determine chip count from reservation, skipping", "reservationName", reservationName)
+		return nil
+	}
+
+	subBlockCount := chipCount / 64
+
+	for i := 0; i < int(subBlockCount); i++ {
+		nodePoolID := fmt.Sprintf("%s-%d", reservationName, i)
+		np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName)
 		if err != nil {
-			return fmt.Errorf("getting reservation %s: %w", reservationName, err)
+			return fmt.Errorf("determining node pool for static reservation: %w", err)
 		}
+		log.Info("Determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
 
-		if reservation == nil {
-			log.Info("reservation not found, skipping", "reservationName", reservationName)
-			continue
+		npExists, err := g.checkNodePoolExists(ctx, np)
+		if err != nil {
+			return fmt.Errorf("checking if node pool exists: %w", err)
 		}
+		log.Info("Checked whether static node pool already exists",
+			"nodePoolName", np.Name, "existingNodePoolState", npExists,
+		)
 
-		var chipCount int64
-		// Check for specific reservation properties
-		if reservation.SpecificReservation != nil &&
-			reservation.SpecificReservation.InstanceProperties != nil &&
-			len(reservation.SpecificReservation.InstanceProperties.GuestAccelerators) > 0 {
-			chipCount = reservation.SpecificReservation.InstanceProperties.GuestAccelerators[0].AcceleratorCount
-		} else if reservation.AggregateReservation != nil &&
-			len(reservation.AggregateReservation.ReservedResources) > 0 &&
-			reservation.AggregateReservation.ReservedResources[0].Accelerator != nil {
-			// This logic is based on the user's instruction that an AggregateReservation field exists.
-			chipCount = reservation.AggregateReservation.ReservedResources[0].Accelerator.AcceleratorCount
-		} else {
-			log.Info("reservation has no supported specific or aggregate reservation properties with accelerators, skipping", "reservationName", reservationName)
-			continue
-		}
-
-		if chipCount == 0 {
-			log.Info("could not determine chip count from reservation, skipping", "reservationName", reservationName)
-			continue
-		}
-
-		subBlockCount := chipCount / 64
-
-		for i := 0; i < int(subBlockCount); i++ {
-			nodePoolID := fmt.Sprintf("%s-%d", reservationName, i)
-			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName)
-			if err != nil {
-				return fmt.Errorf("determining node pool for static reservation: %w", err)
+		if !npExists {
+			req := &containerv1beta1.CreateNodePoolRequest{
+				NodePool: np,
+				Parent:   g.ClusterContext.ClusterName(),
 			}
-			log.Info("determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
 
-			npExists, err := g.checkNodePoolExists(ctx, np)
-			if err != nil {
-				return fmt.Errorf("checking if node pool exists: %w", err)
-			}
-			log.Info("Checked whether static node pool already exists",
-				"nodePoolName", np.Name, "existingNodePoolState", npExists,
-			)
-
-			if !npExists {
-				req := &containerv1beta1.CreateNodePoolRequest{
-					NodePool: np,
-					Parent:   g.ClusterContext.ClusterName(),
-				}
-
-				log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
-				if err := g.NodePools.Create(ctx, req, OpCallbacks{
-					ReqFailure: func(err error) {
-						log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
-					},
-					OpFailure: func(err error) {
-						log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
-					},
-					Success: func() {
-						log.Info("successfully created static node pool", "nodePoolName", np.Name)
-					},
-				}); err != nil {
-					return err
-				}
+			log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
+			if err := g.NodePools.Create(ctx, req, OpCallbacks{
+				ReqFailure: func(err error) {
+					log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
+				},
+				OpFailure: func(err error) {
+					log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
+				},
+				Success: func() {
+					log.Info("successfully created static node pool", "nodePoolName", np.Name)
+				},
+			}); err != nil {
+				return err
 			}
 		}
 	}
@@ -801,6 +799,8 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 	}
 
 	// Nodepool name must be <= 40 characters.
+	// 'static-' prefix in nodepool name is used to exclude static nodepools from the garbage collection loop
+	// used for nodepools that are dynamically provisioned based on workload requirements
 	name := fmt.Sprintf("static-%s", nodePoolID)
 	if len(name) > 40 {
 		name = name[:40]

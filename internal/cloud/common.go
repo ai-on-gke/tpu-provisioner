@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -51,6 +52,7 @@ type Provider interface {
 	DeleteNodePoolForNode(*corev1.Node, string) error
 	DeleteNodePool(string, client.Object, string) error
 	ListNodePools() ([]NodePoolRef, error)
+	EnsureStaticNodePool(ctx context.Context, reservationName string) error
 }
 
 var ErrDuplicateRequest = errors.New("duplicate request")

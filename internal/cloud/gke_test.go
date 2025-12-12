@@ -31,10 +31,9 @@ func (m *mockReservationService) GetReservation(ctx context.Context, name string
 	return r, nil
 }
 
-func TestStaticallyProvisionNodePools(t *testing.T) {
+func TestEnsureStaticNodePool(t *testing.T) {
 	gke, svc, reservationsSvc := newTestGKE(t)
 
-	reservations := []string{"res-1", "res-2"}
 	reservationsSvc.reservations["res-1"] = &computev1.Reservation{
 		Name: "res-1",
 		SpecificReservation: &computev1.AllocationSpecificSKUReservation{
@@ -63,8 +62,11 @@ func TestStaticallyProvisionNodePools(t *testing.T) {
 	}
 
 	// First call, should create both node pools.
-	if err := gke.StaticallyProvisionNodePools(context.Background(), reservations); err != nil {
-		t.Fatalf("StaticallyProvisionNodePools(): %v", err)
+	if err := gke.EnsureStaticNodePool(context.Background(), "res-1"); err != nil {
+		t.Fatalf("EnsureStaticNodePool(): %v", err)
+	}
+	if err := gke.EnsureStaticNodePool(context.Background(), "res-2"); err != nil {
+		t.Fatalf("EnsureStaticNodePool(): %v", err)
 	}
 
 	if got := len(svc.nodePools); got != 2 {
@@ -92,8 +94,11 @@ func TestStaticallyProvisionNodePools(t *testing.T) {
 	}
 
 	// Second call, should not create any new node pools.
-	if err := gke.StaticallyProvisionNodePools(context.Background(), reservations); err != nil {
-		t.Fatalf("StaticallyProvisionNodePools(): %v", err)
+	if err := gke.EnsureStaticNodePool(context.Background(), "res-1"); err != nil {
+		t.Fatalf("EnsureStaticNodePool(): %v", err)
+	}
+	if err := gke.EnsureStaticNodePool(context.Background(), "res-2"); err != nil {
+		t.Fatalf("EnsureStaticNodePool(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {
 		t.Errorf("expected 1 create for static-res-1-0, got %d", got)
@@ -104,8 +109,8 @@ func TestStaticallyProvisionNodePools(t *testing.T) {
 
 	// Modify a node pool and call again, should not create a new one.
 	np1.Config.MachineType = "different"
-	if err := gke.StaticallyProvisionNodePools(context.Background(), reservations); err != nil {
-		t.Fatalf("StaticallyProvisionNodePools(): %v", err)
+	if err := gke.EnsureStaticNodePool(context.Background(), "res-1"); err != nil {
+		t.Fatalf("EnsureStaticNodePool(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {
 		t.Errorf("expected 1 create for static-res-1-0, got %d", got)

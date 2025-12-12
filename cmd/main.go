@@ -103,9 +103,9 @@ func main() {
 
 		PodResourceType string `envconfig:"POD_RESOURCE_TYPE" default:"google.com/tpu"`
 
-		StaticProvisionReservations string `envconfig:"STATIC_PROVISION_RESERVATIONS" default:""`
-
 		Concurrency int `envconfig:"CONCURRENCY" default:"3"`
+
+		ManagerSyncPeriod time.Duration `envconfig:"MANAGER_SYNC_PERIOD" default:"10m"`
 	}
 	envconfig.MustProcess("", &cfg)
 
@@ -125,6 +125,7 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	syncPeriod := cfg.ManagerSyncPeriod
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Metrics: server.Options{
 			BindAddress: metricsAddr,
@@ -139,6 +140,7 @@ func main() {
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "ecaf1259.google.com",
 		Cache: cache.Options{
+			SyncPeriod: &syncPeriod,
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.Node{}: {
 					// Only listen for Nodes with label selectors indicating that they
@@ -247,14 +249,6 @@ func main() {
 			Recorder:       mgr.GetEventRecorderFor("tpu-provisioner"),
 		}
 		provider = gkeProvider
-
-		if cfg.StaticProvisionReservations != "" {
-			reservations := strings.Split(cfg.StaticProvisionReservations, ",")
-			if err := gkeProvider.StaticallyProvisionNodePools(ctx, reservations); err != nil {
-				setupLog.Error(err, "unable to statically provision nodepools")
-				// We don't exit here, as we want the dynamic provisioner to continue running.
-			}
-		}
 	case "mock":
 		provider = &cloud.Mock{}
 	default:
@@ -288,6 +282,16 @@ func main() {
 		Concurrency: cfg.Concurrency,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DeletionReconciler")
+		os.Exit(1)
+	}
+
+	if err := (&controller.StaticNodepoolReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("tpu-provisioner"),
+		Provider: provider,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "StaticNodepoolReconciler")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

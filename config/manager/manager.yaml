@@ -103,5 +103,12 @@ spec:
             requests:
               cpu: 1
               memory: 1Gi
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/config
+      volumes:
+        - name: config-volume
+          configMap:
+            name: static-nodepools-config
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
