@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"gopkg.in/yaml.v2"
@@ -41,7 +42,9 @@ type StaticNodepoolReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	Provider cloud.Provider
+	Provider                    cloud.Provider
+	Concurrency                 int
+	StaticNodepoolCreateTimeout time.Duration
 }
 
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
@@ -77,9 +80,12 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("failed to unmarshal reservations from configmap %s: %w", req.NamespacedName.String(), err)
 	}
 
+	reconcileCtx := cloud.WithStaticNodePoolCreateTimeout(ctx, r.StaticNodepoolCreateTimeout)
+	reconcileCtx = cloud.WithStaticNodePoolConcurrency(reconcileCtx, r.Concurrency)
+
 	for _, reservationName := range reservationNames {
 		lg.Info(fmt.Sprintf("Ensuring static nodepool for reservation: %s", reservationName))
-		if err := r.Provider.EnsureStaticNodePool(ctx, reservationName); err != nil {
+		if err := r.Provider.EnsureStaticNodePools(reconcileCtx, reservationName); err != nil {
 			if apierrors.IsNotFound(err) {
 				lg.Info(fmt.Sprintf("Reservation %s not found, will retry later: %v", reservationName, err))
 			} else {

@@ -646,21 +646,24 @@ func tpuMachineType(accel string, tpuRequest int) (string, error) {
 	return "", fmt.Errorf("invalid accelerator: %v", accel)
 }
 
-func waitForGkeOp(svc *containerv1beta1.Service, c GKEContext, operation *containerv1beta1.Operation) error {
-	operationWaitTimeout := 30 * time.Minute
+func waitForGkeOp(ctx context.Context, svc *containerv1beta1.Service, c GKEContext, operation *containerv1beta1.Operation) error {
 	operationPollInterval := 5 * time.Second
 
-	for start := time.Now(); time.Since(start) < operationWaitTimeout; time.Sleep(operationPollInterval) {
-		if op, err := svc.Projects.Locations.Operations.Get(c.OpName(operation.Name)).Do(); err == nil {
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout while waiting for operation %s on %s to complete: %w", operation.Name, operation.TargetLink, ctx.Err())
+		default:
+			op, err := svc.Projects.Locations.Operations.Get(c.OpName(operation.Name)).Do()
+			if err != nil {
+				return fmt.Errorf("waiting for operation: %w", err)
+			}
 			if op.Status == "DONE" {
 				return nil
 			}
-		} else {
-			return fmt.Errorf("waiting for operation: %w", err)
+			time.Sleep(operationPollInterval)
 		}
 	}
-
-	return fmt.Errorf("timeout while waiting for operation %s on %s to complete", operation.Name, operation.TargetLink)
 }
 
 func min(a, b int) int {
@@ -677,9 +680,9 @@ func getAnnotation(p *corev1.Pod, key string) string {
 	return p.Annotations[key]
 }
 
-// EnsureStaticNodePool provisions a node pool for a given reservation.
-func (g *GKE) EnsureStaticNodePool(ctx context.Context, reservationName string) error {
-	log.Info("Ensuring static nodepool for reservation", "reservationName", reservationName)
+// EnsureStaticNodePools provisions all the node pools for a given reservation.
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string) error {
+	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName)
 	reservation, err := g.Reservations.GetReservation(ctx, reservationName)
 	if err != nil {
 		return fmt.Errorf("getting reservation %s: %w", reservationName, err)
@@ -699,7 +702,6 @@ func (g *GKE) EnsureStaticNodePool(ctx context.Context, reservationName string) 
 	} else if reservation.AggregateReservation != nil &&
 		len(reservation.AggregateReservation.ReservedResources) > 0 &&
 		reservation.AggregateReservation.ReservedResources[0].Accelerator != nil {
-		// This logic is based on the user's instruction that an AggregateReservation field exists.
 		chipCount = reservation.AggregateReservation.ReservedResources[0].Accelerator.AcceleratorCount
 	} else {
 		log.Info("Reservation has no supported specific or aggregate reservation properties with accelerators, skipping", "reservationName", reservationName)
@@ -713,44 +715,80 @@ func (g *GKE) EnsureStaticNodePool(ctx context.Context, reservationName string) 
 
 	subBlockCount := chipCount / 64
 
+	// Retrieve timeout and concurrency from context. These are guaranteed to be present
+	// due to envconfig defaults in cmd/main.go and controller logic.
+	timeout, _ := StaticNodePoolCreateTimeoutFromContext(ctx)
+	concurrency, _ := StaticNodePoolConcurrencyFromContext(ctx)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, subBlockCount)
+	sem := make(chan struct{}, concurrency)
+
 	for i := 0; i < int(subBlockCount); i++ {
-		nodePoolID := fmt.Sprintf("%s-%d", reservationName, i)
-		np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName)
-		if err != nil {
-			return fmt.Errorf("determining node pool for static reservation: %w", err)
-		}
-		log.Info("Determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
+		wg.Add(1)
+		sem <- struct{}{}
 
-		npExists, err := g.checkNodePoolExists(ctx, np)
-		if err != nil {
-			return fmt.Errorf("checking if node pool exists: %w", err)
-		}
-		log.Info("Checked whether static node pool already exists",
-			"nodePoolName", np.Name, "existingNodePoolState", npExists,
-		)
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-		if !npExists {
-			req := &containerv1beta1.CreateNodePoolRequest{
-				NodePool: np,
-				Parent:   g.ClusterContext.ClusterName(),
+			nodePoolID := fmt.Sprintf("%s-%d", reservationName, i)
+			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName)
+			if err != nil {
+				errs <- fmt.Errorf("determining node pool for static reservation: %w", err)
+				return
 			}
+			log.Info("Determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
 
-			log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
-			if err := g.NodePools.Create(ctx, req, OpCallbacks{
-				ReqFailure: func(err error) {
-					log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
-				},
-				OpFailure: func(err error) {
-					log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
-				},
-				Success: func() {
-					log.Info("successfully created static node pool", "nodePoolName", np.Name)
-				},
-			}); err != nil {
-				return err
+			npExists, err := g.checkNodePoolExists(ctx, np)
+			if err != nil {
+				errs <- fmt.Errorf("checking if node pool exists: %w", err)
+				return
 			}
-		}
+			log.Info("Checked whether static node pool already exists",
+				"nodePoolName", np.Name, "existingNodePoolState", npExists,
+			)
+
+			if !npExists {
+				req := &containerv1beta1.CreateNodePoolRequest{
+					NodePool: np,
+					Parent:   g.ClusterContext.ClusterName(),
+				}
+
+				// Create a new context with the retrieved timeout for each nodepool create request.
+				createCtx, cancel := context.WithTimeout(ctx, timeout)
+				defer cancel()
+
+				log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
+				if err := g.NodePools.Create(createCtx, req, OpCallbacks{
+					ReqFailure: func(err error) {
+						log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
+					},
+					OpFailure: func(err error) {
+						log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
+					},
+					Success: func() {
+						log.Info("successfully created static node pool", "nodePoolName", np.Name)
+					},
+				}); err != nil {
+					errs <- err
+				}
+			}
+		}(i)
 	}
+
+	wg.Wait()
+	close(errs)
+
+	var allErrors []error
+	for err := range errs {
+		allErrors = append(allErrors, err)
+	}
+
+	if len(allErrors) > 0 {
+		return fmt.Errorf("failed to create all nodepools: %v", allErrors)
+	}
+
 	return nil
 }
 

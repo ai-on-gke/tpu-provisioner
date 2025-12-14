@@ -6,17 +6,18 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
 	"github.com/google/go-cmp/cmp"
 	computev1 "google.golang.org/api/compute/v1"
 	container "google.golang.org/api/container/v1beta1"
 	"google.golang.org/api/googleapi"
 	"k8s.io/apimachinery/pkg/api/resource"
-	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
 type mockReservationService struct {
@@ -61,12 +62,16 @@ func TestEnsureStaticNodePool(t *testing.T) {
 		},
 	}
 
+	ctx := context.Background()
+	ctx = WithStaticNodePoolConcurrency(ctx, 2)
+	ctx = WithStaticNodePoolCreateTimeout(ctx, 10*time.Minute)
+
 	// First call, should create both node pools.
-	if err := gke.EnsureStaticNodePool(context.Background(), "res-1"); err != nil {
-		t.Fatalf("EnsureStaticNodePool(): %v", err)
+	if err := gke.EnsureStaticNodePools(ctx, "res-1"); err != nil {
+		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
-	if err := gke.EnsureStaticNodePool(context.Background(), "res-2"); err != nil {
-		t.Fatalf("EnsureStaticNodePool(): %v", err)
+	if err := gke.EnsureStaticNodePools(ctx, "res-2"); err != nil {
+		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 
 	if got := len(svc.nodePools); got != 2 {
@@ -94,11 +99,11 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 
 	// Second call, should not create any new node pools.
-	if err := gke.EnsureStaticNodePool(context.Background(), "res-1"); err != nil {
-		t.Fatalf("EnsureStaticNodePool(): %v", err)
+	if err := gke.EnsureStaticNodePools(ctx, "res-1"); err != nil {
+		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
-	if err := gke.EnsureStaticNodePool(context.Background(), "res-2"); err != nil {
-		t.Fatalf("EnsureStaticNodePool(): %v", err)
+	if err := gke.EnsureStaticNodePools(ctx, "res-2"); err != nil {
+		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {
 		t.Errorf("expected 1 create for static-res-1-0, got %d", got)
@@ -109,12 +114,13 @@ func TestEnsureStaticNodePool(t *testing.T) {
 
 	// Modify a node pool and call again, should not create a new one.
 	np1.Config.MachineType = "different"
-	if err := gke.EnsureStaticNodePool(context.Background(), "res-1"); err != nil {
-		t.Fatalf("EnsureStaticNodePool(): %v", err)
+	if err := gke.EnsureStaticNodePools(ctx, "res-1"); err != nil {
+		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {
 		t.Errorf("expected 1 create for static-res-1-0, got %d", got)
 	}
+
 }
 
 func newTestGKE(t *testing.T) (*GKE, *mockGKEService, *mockReservationService) {

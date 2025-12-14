@@ -46,13 +46,38 @@ const (
 	EventNodePoolNotFound = "NodePoolNotFound"
 )
 
+type staticNodePoolCreateTimeoutKey struct{}
+type staticNodePoolConcurrencyKey struct{}
+
+// WithStaticNodePoolCreateTimeout creates a new context with the given timeout.
+func WithStaticNodePoolCreateTimeout(ctx context.Context, timeout time.Duration) context.Context {
+	return context.WithValue(ctx, staticNodePoolCreateTimeoutKey{}, timeout)
+}
+
+// StaticNodePoolCreateTimeoutFromContext returns the timeout value from the context.
+func StaticNodePoolCreateTimeoutFromContext(ctx context.Context) (time.Duration, bool) {
+	timeout, ok := ctx.Value(staticNodePoolCreateTimeoutKey{}).(time.Duration)
+	return timeout, ok
+}
+
+// WithStaticNodePoolConcurrency creates a new context with the given concurrency.
+func WithStaticNodePoolConcurrency(ctx context.Context, concurrency int) context.Context {
+	return context.WithValue(ctx, staticNodePoolConcurrencyKey{}, concurrency)
+}
+
+// StaticNodePoolConcurrencyFromContext returns the concurrency value from the context.
+func StaticNodePoolConcurrencyFromContext(ctx context.Context) (int, bool) {
+	concurrency, ok := ctx.Value(staticNodePoolConcurrencyKey{}).(int)
+	return concurrency, ok
+}
+
 type Provider interface {
 	NodePoolLabelKey() string
 	EnsureNodePoolForPod(*corev1.Pod, string) error
 	DeleteNodePoolForNode(*corev1.Node, string) error
 	DeleteNodePool(string, client.Object, string) error
 	ListNodePools() ([]NodePoolRef, error)
-	EnsureStaticNodePool(ctx context.Context, reservationName string) error
+	EnsureStaticNodePools(ctx context.Context, reservationName string) error
 }
 
 var ErrDuplicateRequest = errors.New("duplicate request")

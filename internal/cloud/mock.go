@@ -13,9 +13,11 @@ var _ Provider = &Mock{}
 type Mock struct{}
 
 // TODO: Find a better mock node pool label key.
-func (m *Mock) NodePoolLabelKey() string                                 { return "kubernetes.io/os" }
-func (m *Mock) EnsureNodePoolForPod(*corev1.Pod, string) error           { return nil }
-func (m *Mock) DeleteNodePoolForNode(*corev1.Node, string) error         { return nil }
-func (m *Mock) DeleteNodePool(string, client.Object, string) error       { return nil }
-func (m *Mock) ListNodePools() ([]NodePoolRef, error)                    { return nil, nil }
-func (m *Mock) EnsureStaticNodePool(ctx context.Context, s string) error { return nil }
+func (m *Mock) NodePoolLabelKey() string                           { return "kubernetes.io/os" }
+func (m *Mock) EnsureNodePoolForPod(*corev1.Pod, string) error     { return nil }
+func (m *Mock) DeleteNodePoolForNode(*corev1.Node, string) error   { return nil }
+func (m *Mock) DeleteNodePool(string, client.Object, string) error { return nil }
+func (m *Mock) ListNodePools() ([]NodePoolRef, error)              { return nil, nil }
+func (m *Mock) EnsureStaticNodePools(ctx context.Context, s string) error {
+	return nil
+}
