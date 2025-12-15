@@ -18,6 +18,6 @@ func (m *Mock) EnsureNodePoolForPod(*corev1.Pod, string) error     { return nil 
 func (m *Mock) DeleteNodePoolForNode(*corev1.Node, string) error   { return nil }
 func (m *Mock) DeleteNodePool(string, client.Object, string) error { return nil }
 func (m *Mock) ListNodePools() ([]NodePoolRef, error)              { return nil, nil }
-func (m *Mock) EnsureStaticNodePools(ctx context.Context, s string) error {
+func (m *Mock) EnsureStaticNodePools(ctx context.Context, reservationName string, config *NodePoolConfig) error {
 	return nil
 }

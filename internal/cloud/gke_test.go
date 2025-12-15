@@ -66,11 +66,18 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	ctx = WithStaticNodePoolConcurrency(ctx, 2)
 	ctx = WithStaticNodePoolCreateTimeout(ctx, 10*time.Minute)
 
+	config := &NodePoolConfig{
+		MachineType: "tpu7x-standard-4t",
+		Accelerator: V7xSliceAccelerator,
+		Topology:    "4x4x4",
+		NodeCount:   16,
+	}
+
 	// First call, should create both node pools.
-	if err := gke.EnsureStaticNodePools(ctx, "res-1"); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", config); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
-	if err := gke.EnsureStaticNodePools(ctx, "res-2"); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-2", config); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 
@@ -99,10 +106,10 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 
 	// Second call, should not create any new node pools.
-	if err := gke.EnsureStaticNodePools(ctx, "res-1"); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", config); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
-	if err := gke.EnsureStaticNodePools(ctx, "res-2"); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-2", config); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {
@@ -114,7 +121,7 @@ func TestEnsureStaticNodePool(t *testing.T) {
 
 	// Modify a node pool and call again, should not create a new one.
 	np1.Config.MachineType = "different"
-	if err := gke.EnsureStaticNodePools(ctx, "res-1"); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", config); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {
@@ -612,6 +619,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -643,6 +651,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5lp-hightpu-1t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  1,
 				Locations:         []string{""},
@@ -674,6 +683,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct6e-standard-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  1,
 				Locations:         []string{""},
@@ -705,6 +715,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct6e-standard-16t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  4,
 				Locations:         []string{""},
@@ -738,6 +749,7 @@ func TestNodePoolForPod(t *testing.T) {
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
 					Spot:                   true,
+					Tags:                   []string{},
 					Taints: []*container.NodeTaint{
 						{Effect: "NO_SCHEDULE", Key: "cloud.google.com/gke-spot", Value: "true"},
 					},
@@ -772,6 +784,7 @@ func TestNodePoolForPod(t *testing.T) {
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
 					Spot:                   false,
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -804,6 +817,7 @@ func TestNodePoolForPod(t *testing.T) {
 						Values:                 []string{"tpu-rsv"},
 					},
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -839,6 +853,7 @@ func TestNodePoolForPod(t *testing.T) {
 						Values:                 []string{"projects/tpu-rsv-project/reservations/tpu-rsv"},
 					},
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -868,6 +883,7 @@ func TestNodePoolForPod(t *testing.T) {
 					MachineType:            "ct5p-hightpu-4t",
 					ReservationAffinity:    nil,
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -896,8 +912,8 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
-				},
-				InitialNodeCount:  512,
+					Tags:                   []string{},
+				}, InitialNodeCount: 512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
 				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 15},
@@ -921,6 +937,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 					SecondaryBootDisks: []*container.SecondaryBootDisk{
 						{
 							DiskImage: "projects/my-gcp-project/global/images/my-disk-image",
@@ -955,6 +972,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -989,6 +1007,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1023,6 +1042,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1050,6 +1070,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1094,6 +1115,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                   []string{},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1135,6 +1157,7 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:               "ct5p-hightpu-4t",
 					ShieldedInstanceConfig:    &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					Tags:                      []string{},
 					EnableConfidentialStorage: true,
 					BootDiskKmsKey:            "my-kms-key",
 					DiskType:                  "hyperdisk-balanced",

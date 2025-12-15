@@ -49,6 +49,19 @@ const (
 type staticNodePoolCreateTimeoutKey struct{}
 type staticNodePoolConcurrencyKey struct{}
 
+// NodePoolConfig defines the configuration for a static node pool.
+type NodePoolConfig struct {
+	MachineType                 string            `yaml:"machineType"`
+	Accelerator                 string            `yaml:"accelerator"`
+	Topology                    string            `yaml:"topology"`
+	NodeCount                   int               `yaml:"nodeCount"`
+	NodeLabels                  map[string]string `yaml:"nodeLabels"`
+	ShieldedIntegrityMonitoring *bool             `yaml:"shieldedIntegrityMonitoring"`
+	MaxPodsPerNode              int64             `yaml:"maxPodsPerNode"`
+	EnableAutoRepair            *bool             `yaml:"enableAutorepair"`
+	PlacementPolicy             string            `yaml:"placementPolicy"`
+}
+
 // WithStaticNodePoolCreateTimeout creates a new context with the given timeout.
 func WithStaticNodePoolCreateTimeout(ctx context.Context, timeout time.Duration) context.Context {
 	return context.WithValue(ctx, staticNodePoolCreateTimeoutKey{}, timeout)
@@ -77,7 +90,7 @@ type Provider interface {
 	DeleteNodePoolForNode(*corev1.Node, string) error
 	DeleteNodePool(string, client.Object, string) error
 	ListNodePools() ([]NodePoolRef, error)
-	EnsureStaticNodePools(ctx context.Context, reservationName string) error
+	EnsureStaticNodePools(ctx context.Context, reservationName string, config *NodePoolConfig) error
 }
 
 var ErrDuplicateRequest = errors.New("duplicate request")

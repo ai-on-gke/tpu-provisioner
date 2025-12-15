@@ -517,7 +517,7 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 				EnableIntegrityMonitoring: true,
 				EnableSecureBoot:          g.ClusterContext.NodeSecureBoot,
 			},
-			Tags: g.ClusterContext.NodeTags,
+			Tags: []string{},
 			// NOTE: vendor/ was manually updated to include the field because
 			// it was not currently available at the time of writing:
 			SecondaryBootDisks:        secondaryDisks,
@@ -681,7 +681,7 @@ func getAnnotation(p *corev1.Pod, key string) string {
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string) error {
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string, config *NodePoolConfig) error {
 	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName)
 	reservation, err := g.Reservations.GetReservation(ctx, reservationName)
 	if err != nil {
@@ -733,7 +733,7 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string)
 			defer func() { <-sem }()
 
 			nodePoolID := fmt.Sprintf("%s-%d", reservationName, i)
-			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName)
+			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName, config)
 			if err != nil {
 				errs <- fmt.Errorf("determining node pool for static reservation: %w", err)
 				return
@@ -792,10 +792,13 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string)
 	return nil
 }
 
-func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume string) (*containerv1beta1.NodePool, error) {
+func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume string, config *NodePoolConfig) (*containerv1beta1.NodePool, error) {
 	labels := map[string]string{
 		LabelNodepoolManager:       LabelNodepoolManagerTPUPodinator,
 		LabelProvisionerNodepoolID: nodePoolID,
+	}
+	for k, v := range config.NodeLabels {
+		labels[k] = v
 	}
 
 	reservation := &containerv1beta1.ReservationAffinity{
@@ -805,13 +808,6 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 			reservationToConsume,
 		},
 	}
-
-	nodeCount := 16
-	machineType := "tpu7x-standard-4t"
-	accelerator := V7xSliceAccelerator
-	topology := "4x4x4"
-
-	var taints []*containerv1beta1.NodeTaint
 
 	var secondaryDisks []*containerv1beta1.SecondaryBootDisk
 	if g.ClusterContext.NodeSecondaryDisk != "" {
@@ -823,11 +819,39 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 		}
 	}
 
+	var networkConfig *containerv1beta1.NodeNetworkConfig
+	var additionalNodeNetworks []*containerv1beta1.AdditionalNodeNetworkConfig
+	// additional-node-networks: "vpc1:subnet1, vpc2:subnet2"
+	additionalNodeNetworksCSV := g.ClusterContext.NodeAdditionalNetworks
+	for _, pair := range strings.Split(additionalNodeNetworksCSV, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+
+		netAndSubnet := strings.SplitN(pair, ":", 2)
+		if len(netAndSubnet) != 2 {
+			return nil, fmt.Errorf("invalid additional network annotation: %v", pair)
+		}
+
+		additionalNodeNetworks = append(additionalNodeNetworks, &containerv1beta1.AdditionalNodeNetworkConfig{
+			Network:    strings.TrimSpace(netAndSubnet[0]),
+			Subnetwork: strings.TrimSpace(netAndSubnet[1]),
+		})
+	}
+	if len(additionalNodeNetworks) > 0 {
+		networkConfig = &containerv1beta1.NodeNetworkConfig{
+			AdditionalNodeNetworkConfigs: additionalNodeNetworks,
+		}
+	}
+
 	placementPolicy := &containerv1beta1.PlacementPolicy{}
-	if accelerator == V7xSliceAccelerator {
-		placementPolicy.PolicyName = fmt.Sprintf("tpu-provisioner-%v", topology)
+	if config.PlacementPolicy != "" {
+		placementPolicy.PolicyName = config.PlacementPolicy
+	} else if config.Accelerator == V7xSliceAccelerator {
+		placementPolicy.PolicyName = fmt.Sprintf("tpu-provisioner-%v", config.Topology)
 	} else {
-		placementPolicy.TpuTopology = topology
+		placementPolicy.TpuTopology = config.Topology
 		placementPolicy.Type = "COMPACT"
 	}
 
@@ -844,35 +868,55 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 		name = name[:40]
 	}
 
+	shieldedIntegrityMonitoring := true
+	if config.ShieldedIntegrityMonitoring != nil {
+		shieldedIntegrityMonitoring = *config.ShieldedIntegrityMonitoring
+	}
+	shieldedSecureBoot := g.ClusterContext.NodeSecureBoot
+
+	autorepair := true
+	if config.EnableAutoRepair != nil {
+		autorepair = *config.EnableAutoRepair
+	}
+
+	maxPods := maxPodsPerNode
+	if config.MaxPodsPerNode != 0 {
+		maxPods = int(config.MaxPodsPerNode)
+	}
+
+	locations := []string{g.ClusterContext.NodeZone}
+
+	tags := g.ClusterContext.NodeTags
+
 	np := &containerv1beta1.NodePool{
 		Name: name,
 		Config: &containerv1beta1.NodeConfig{
 			ServiceAccount: g.ClusterContext.NodeServiceAccount,
 			ShieldedInstanceConfig: &containerv1beta1.ShieldedInstanceConfig{
-				EnableIntegrityMonitoring: true,
-				EnableSecureBoot:          g.ClusterContext.NodeSecureBoot,
+				EnableIntegrityMonitoring: shieldedIntegrityMonitoring,
+				EnableSecureBoot:          shieldedSecureBoot,
 			},
-			Tags:                      g.ClusterContext.NodeTags,
+			Tags:                      tags,
 			SecondaryBootDisks:        secondaryDisks,
-			MachineType:               machineType,
+			MachineType:               config.MachineType,
 			ReservationAffinity:       reservation,
 			Labels:                    labels,
-			Taints:                    taints,
 			BootDiskKmsKey:            g.ClusterContext.NodeBootDiskKMSKey,
 			DiskType:                  diskType,
 			EnableConfidentialStorage: g.ClusterContext.NodeConfidentialStorage,
 		},
-		InitialNodeCount: int64(nodeCount),
-		Locations:        []string{g.ClusterContext.NodeZone},
+		InitialNodeCount: int64(config.NodeCount),
+		Locations:        locations,
 		PlacementPolicy:  placementPolicy,
 		Management: &containerv1beta1.NodeManagement{
-			AutoRepair:  true,
+			AutoRepair:  autorepair,
 			AutoUpgrade: false,
 		},
 		UpgradeSettings: &containerv1beta1.UpgradeSettings{
 			MaxSurge: 1,
 		},
-		MaxPodsConstraint: &containerv1beta1.MaxPodsConstraint{MaxPodsPerNode: maxPodsPerNode},
+		MaxPodsConstraint: &containerv1beta1.MaxPodsConstraint{MaxPodsPerNode: int64(maxPods)},
+		NetworkConfig:     networkConfig,
 	}
 
 	hash, err := nodePoolSelectiveHash(np)
