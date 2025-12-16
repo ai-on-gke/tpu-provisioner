@@ -80,7 +80,7 @@ func main() {
 		GCPCluster            string `envconfig:"GCP_CLUSTER"`
 		GCPNodeServiceAccount string `envconfig:"GCP_NODE_SERVICE_ACCOUNT"`
 
-		GCPNodeTags               []string `envconfig:"GCP_NODE_TAGS" default:""`
+		GCPNodeTags               []string `envconfig:"GCP_NODE_TAGS"`
 		GCPPodToNodeLabels        []string `envconfig:"GCP_POD_TO_NODE_LABELS"`
 		GCPNodeSecondaryDisk      string   `envconfig:"GCP_NODE_SECONDARY_DISK" default:""`
 		GCPNodeSecureBoot         bool     `envconfig:"GCP_NODE_SECURE_BOOT" default:"true"`

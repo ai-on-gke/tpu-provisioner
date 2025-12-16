@@ -681,7 +681,7 @@ func getAnnotation(p *corev1.Pod, key string) string {
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string, config *NodePoolConfig) error {
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string, config *StaticNodePoolConfig, concurrency int, timeout time.Duration) error {
 	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName)
 	reservation, err := g.Reservations.GetReservation(ctx, reservationName)
 	if err != nil {
@@ -714,11 +714,6 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 	}
 
 	subBlockCount := chipCount / 64
-
-	// Retrieve timeout and concurrency from context. These are guaranteed to be present
-	// due to envconfig defaults in cmd/main.go and controller logic.
-	timeout, _ := StaticNodePoolCreateTimeoutFromContext(ctx)
-	concurrency, _ := StaticNodePoolConcurrencyFromContext(ctx)
 
 	var wg sync.WaitGroup
 	errs := make(chan error, subBlockCount)
@@ -755,7 +750,6 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 					Parent:   g.ClusterContext.ClusterName(),
 				}
 
-				// Create a new context with the retrieved timeout for each nodepool create request.
 				createCtx, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
 
@@ -792,7 +786,7 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 	return nil
 }
 
-func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume string, config *NodePoolConfig) (*containerv1beta1.NodePool, error) {
+func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume string, config *StaticNodePoolConfig) (*containerv1beta1.NodePool, error) {
 	labels := map[string]string{
 		LabelNodepoolManager:       LabelNodepoolManagerTPUPodinator,
 		LabelProvisionerNodepoolID: nodePoolID,

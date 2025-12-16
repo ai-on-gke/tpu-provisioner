@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,10 +62,8 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	ctx = WithStaticNodePoolConcurrency(ctx, 2)
-	ctx = WithStaticNodePoolCreateTimeout(ctx, 10*time.Minute)
 
-	config := &NodePoolConfig{
+	config := &StaticNodePoolConfig{
 		MachineType: "tpu7x-standard-4t",
 		Accelerator: V7xSliceAccelerator,
 		Topology:    "4x4x4",
@@ -74,10 +71,10 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 
 	// First call, should create both node pools.
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", config); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", config, 1, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
-	if err := gke.EnsureStaticNodePools(ctx, "res-2", config); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-2", config, 1, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 
@@ -106,10 +103,10 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 
 	// Second call, should not create any new node pools.
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", config); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", config, 1, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
-	if err := gke.EnsureStaticNodePools(ctx, "res-2", config); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-2", config, 1, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {
@@ -121,7 +118,7 @@ func TestEnsureStaticNodePool(t *testing.T) {
 
 	// Modify a node pool and call again, should not create a new one.
 	np1.Config.MachineType = "different"
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", config); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", config, 1, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {

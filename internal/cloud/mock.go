@@ -2,6 +2,8 @@ package cloud
 
 import (
 	"context"
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -18,6 +20,6 @@ func (m *Mock) EnsureNodePoolForPod(*corev1.Pod, string) error     { return nil 
 func (m *Mock) DeleteNodePoolForNode(*corev1.Node, string) error   { return nil }
 func (m *Mock) DeleteNodePool(string, client.Object, string) error { return nil }
 func (m *Mock) ListNodePools() ([]NodePoolRef, error)              { return nil, nil }
-func (m *Mock) EnsureStaticNodePools(ctx context.Context, reservationName string, config *NodePoolConfig) error {
+func (m *Mock) EnsureStaticNodePools(ctx context.Context, reservationName string, config *StaticNodePoolConfig, concurrency int, timeout time.Duration) error {
 	return nil
 }

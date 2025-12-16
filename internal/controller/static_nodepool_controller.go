@@ -86,17 +86,14 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	var nodepoolConfig cloud.NodePoolConfig
+	var nodepoolConfig cloud.StaticNodePoolConfig
 	if err := yaml.Unmarshal([]byte(nodepoolConfigYAML), &nodepoolConfig); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to unmarshal nodepoolConfig from configmap %s: %w", req.NamespacedName.String(), err)
 	}
 
-	reconcileCtx := cloud.WithStaticNodePoolCreateTimeout(ctx, r.StaticNodepoolCreateTimeout)
-	reconcileCtx = cloud.WithStaticNodePoolConcurrency(reconcileCtx, r.Concurrency)
-
 	for _, reservationName := range reservationNames {
 		lg.Info(fmt.Sprintf("Ensuring static nodepool for reservation: %s", reservationName))
-		if err := r.Provider.EnsureStaticNodePools(reconcileCtx, reservationName, &nodepoolConfig); err != nil {
+		if err := r.Provider.EnsureStaticNodePools(ctx, reservationName, &nodepoolConfig, r.Concurrency, r.StaticNodepoolCreateTimeout); err != nil {
 			if apierrors.IsNotFound(err) {
 				lg.Info(fmt.Sprintf("Reservation %s not found, will retry later: %v", reservationName, err))
 			} else {
