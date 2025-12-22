@@ -450,27 +450,13 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 	}
 
 	var networkConfig *containerv1beta1.NodeNetworkConfig
-	var additionalNodeNetworks []*containerv1beta1.AdditionalNodeNetworkConfig
-	// additional-node-networks: "vpc1:subnet1, vpc2:subnet2"
 	additionalNodeNetworksCSV := g.ClusterContext.NodeAdditionalNetworks
 	if getAnnotation(p, AnnotationAdditionalNodeNetworks) != "" {
 		additionalNodeNetworksCSV = getAnnotation(p, AnnotationAdditionalNodeNetworks)
 	}
-	for _, pair := range strings.Split(additionalNodeNetworksCSV, ",") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-
-		netAndSubnet := strings.SplitN(pair, ":", 2)
-		if len(netAndSubnet) != 2 {
-			return nil, fmt.Errorf("invalid additional network annotation: %v", pair)
-		}
-
-		additionalNodeNetworks = append(additionalNodeNetworks, &containerv1beta1.AdditionalNodeNetworkConfig{
-			Network:    strings.TrimSpace(netAndSubnet[0]),
-			Subnetwork: strings.TrimSpace(netAndSubnet[1]),
-		})
+	additionalNodeNetworks, err := parseAdditionalNodeNetworks(additionalNodeNetworksCSV)
+	if err != nil {
+		return nil, err
 	}
 	if len(additionalNodeNetworks) > 0 {
 		networkConfig = &containerv1beta1.NodeNetworkConfig{
@@ -650,19 +636,14 @@ func waitForGkeOp(ctx context.Context, svc *containerv1beta1.Service, c GKEConte
 	operationPollInterval := 5 * time.Second
 
 	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout while waiting for operation %s on %s to complete: %w", operation.Name, operation.TargetLink, ctx.Err())
-		default:
-			op, err := svc.Projects.Locations.Operations.Get(c.OpName(operation.Name)).Do()
-			if err != nil {
-				return fmt.Errorf("waiting for operation: %w", err)
-			}
-			if op.Status == "DONE" {
-				return nil
-			}
-			time.Sleep(operationPollInterval)
+		op, err := svc.Projects.Locations.Operations.Get(c.OpName(operation.Name)).Context(ctx).Do()
+		if err != nil {
+			return fmt.Errorf("waiting for operation: %w", err)
 		}
+		if op.Status == "DONE" {
+			return nil
+		}
+		time.Sleep(operationPollInterval)
 	}
 }
 
@@ -678,6 +659,28 @@ func getAnnotation(p *corev1.Pod, key string) string {
 		return ""
 	}
 	return p.Annotations[key]
+}
+
+func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*containerv1beta1.AdditionalNodeNetworkConfig, error) {
+	var additionalNodeNetworks []*containerv1beta1.AdditionalNodeNetworkConfig
+	// additional-node-networks: "vpc1:subnet1, vpc2:subnet2"
+	for _, pair := range strings.Split(additionalNodeNetworksCSV, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+
+		netAndSubnet := strings.SplitN(pair, ":", 2)
+		if len(netAndSubnet) != 2 {
+			return nil, fmt.Errorf("invalid additional network annotation: %v", pair)
+		}
+
+		additionalNodeNetworks = append(additionalNodeNetworks, &containerv1beta1.AdditionalNodeNetworkConfig{
+			Network:    strings.TrimSpace(netAndSubnet[0]),
+			Subnetwork: strings.TrimSpace(netAndSubnet[1]),
+		})
+	}
+	return additionalNodeNetworks, nil
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
@@ -716,7 +719,8 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 	subBlockCount := chipCount / 64
 
 	var wg sync.WaitGroup
-	errs := make(chan error, subBlockCount)
+	var mu sync.Mutex
+	var allErrors []error
 	sem := make(chan struct{}, concurrency)
 
 	for i := 0; i < int(subBlockCount); i++ {
@@ -730,14 +734,18 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 			nodePoolID := fmt.Sprintf("%s-%d", reservationName, i)
 			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName, config)
 			if err != nil {
-				errs <- fmt.Errorf("determining node pool for static reservation: %w", err)
+				mu.Lock()
+				allErrors = append(allErrors, fmt.Errorf("determining node pool for static reservation: %w", err))
+				mu.Unlock()
 				return
 			}
 			log.Info("Determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
 
 			npExists, err := g.checkNodePoolExists(ctx, np)
 			if err != nil {
-				errs <- fmt.Errorf("checking if node pool exists: %w", err)
+				mu.Lock()
+				allErrors = append(allErrors, fmt.Errorf("checking if node pool exists: %w", err))
+				mu.Unlock()
 				return
 			}
 			log.Info("Checked whether static node pool already exists",
@@ -765,19 +773,15 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 						log.Info("successfully created static node pool", "nodePoolName", np.Name)
 					},
 				}); err != nil {
-					errs <- err
+					mu.Lock()
+					allErrors = append(allErrors, err)
+					mu.Unlock()
 				}
 			}
 		}(i)
 	}
 
 	wg.Wait()
-	close(errs)
-
-	var allErrors []error
-	for err := range errs {
-		allErrors = append(allErrors, err)
-	}
 
 	if len(allErrors) > 0 {
 		return fmt.Errorf("failed to create all nodepools: %v", allErrors)
@@ -814,25 +818,11 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 	}
 
 	var networkConfig *containerv1beta1.NodeNetworkConfig
-	var additionalNodeNetworks []*containerv1beta1.AdditionalNodeNetworkConfig
-	// additional-node-networks: "vpc1:subnet1, vpc2:subnet2"
-	additionalNodeNetworksCSV := g.ClusterContext.NodeAdditionalNetworks
-	for _, pair := range strings.Split(additionalNodeNetworksCSV, ",") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-
-		netAndSubnet := strings.SplitN(pair, ":", 2)
-		if len(netAndSubnet) != 2 {
-			return nil, fmt.Errorf("invalid additional network annotation: %v", pair)
-		}
-
-		additionalNodeNetworks = append(additionalNodeNetworks, &containerv1beta1.AdditionalNodeNetworkConfig{
-			Network:    strings.TrimSpace(netAndSubnet[0]),
-			Subnetwork: strings.TrimSpace(netAndSubnet[1]),
-		})
+	additionalNodeNetworks, err := parseAdditionalNodeNetworks(g.ClusterContext.NodeAdditionalNetworks)
+	if err != nil {
+		return nil, err
 	}
+
 	if len(additionalNodeNetworks) > 0 {
 		networkConfig = &containerv1beta1.NodeNetworkConfig{
 			AdditionalNodeNetworkConfigs: additionalNodeNetworks,
