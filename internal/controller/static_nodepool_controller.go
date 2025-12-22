@@ -77,7 +77,8 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	var reservationNames []string
 	if err := yaml.Unmarshal([]byte(reservationsYAML), &reservationNames); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to unmarshal reservations from configmap %s: %w", req.NamespacedName.String(), err)
+		lg.Error(err, "failed to unmarshal reservations from configmap", "configmap", req.NamespacedName.String())
+		return ctrl.Result{}, nil
 	}
 
 	nodepoolConfigYAML, ok := cm.Data["nodepoolConfig"]
@@ -88,19 +89,22 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	var nodepoolConfig cloud.StaticNodePoolConfig
 	if err := yaml.Unmarshal([]byte(nodepoolConfigYAML), &nodepoolConfig); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to unmarshal nodepoolConfig from configmap %s: %w", req.NamespacedName.String(), err)
+		lg.Error(err, "failed to unmarshal nodepoolConfig from configmap", "configmap", req.NamespacedName.String())
+		return ctrl.Result{}, nil
 	}
 
+	var allErrors []error
 	for _, reservationName := range reservationNames {
 		lg.Info(fmt.Sprintf("Ensuring static nodepool for reservation: %s", reservationName))
 		if err := r.Provider.EnsureStaticNodePools(ctx, reservationName, &nodepoolConfig, r.Concurrency, r.StaticNodepoolCreateTimeout); err != nil {
-			if apierrors.IsNotFound(err) {
-				lg.Info(fmt.Sprintf("Reservation %s not found, will retry later: %v", reservationName, err))
-			} else {
-				lg.Error(err, fmt.Sprintf("Failed to ensure static nodepool for reservation %s", reservationName))
-			}
-			return ctrl.Result{Requeue: true}, fmt.Errorf("failed to ensure static nodepool for %s: %w", reservationName, err)
+			wrappedErr := fmt.Errorf("failed to ensure static nodepool for %s: %w", reservationName, err)
+			lg.Error(wrappedErr, "error ensuring static nodepool for reservation")
+			allErrors = append(allErrors, wrappedErr)
 		}
+	}
+
+	if len(allErrors) > 0 {
+		return ctrl.Result{}, fmt.Errorf("failed to ensure all static nodepools: %v", allErrors)
 	}
 
 	return ctrl.Result{}, nil

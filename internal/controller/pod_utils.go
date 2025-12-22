@@ -8,8 +8,8 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
-// IsStaticNodePool returns true if the nodepool has a name with prefix 'static-', otherwise it returns false.
-func IsStaticNodePool(nodePoolName string) bool {
+// isStaticNodePool returns true if the nodepool has a name with prefix 'static-', otherwise it returns false.
+func isStaticNodePool(nodePoolName string) bool {
 	return strings.HasPrefix(nodePoolName, "static-")
 }
 
