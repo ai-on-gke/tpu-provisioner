@@ -30,6 +30,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 const (
@@ -54,7 +55,7 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	lg := ctrllog.FromContext(ctx)
 
 	// Only reconcile if this configmap is the one we are looking for.
-	if req.Name != ConfigMapName || req.Namespace != "default" {
+	if req.Name != ConfigMapName {
 		return ctrl.Result{}, nil
 	}
 
@@ -114,5 +115,8 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 func (r *StaticNodepoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}).
+		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
+			return object.GetName() == ConfigMapName
+		})).
 		Complete(r)
 }

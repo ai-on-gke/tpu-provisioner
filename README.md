@@ -91,6 +91,13 @@ export CONTAINER_IMAGE=us-docker.pkg.dev/${PROJECT_ID}/default/tpu-provisioner:$
 make docker-build docker-push IMG=${CONTAINER_IMAGE}
 ```
 
+Note: for multi-platform builds or when building on a platform that does not match the target architecture, the easiest method is to use Cloud Build.
+This command will automatically build and push the image to artifact registry:
+
+```bash
+gcloud builds submit --tag $CONTAINER_IMAGE --project=$PROJECT_ID .
+```
+
 Set the container image in the manifests.
 
 ```bash
@@ -169,4 +176,4 @@ kubectl apply -f ./examples/v4-2x2x4/
 
 ### Ironwood / tpu7x support
 
-In order to support ironwood we need to have Workload Policy's attached to nodepool creation step, in order to work with the tpu-provisioner you will need Workload Policy resources in the project and region with the following syntax: `tpu-provisioner-$TPU_TOPOLOGY`, e.g. `tpu-provisioner-2x2x2` or `tpu-provisioner-8x8x16`. See the script in [./docs/ironwood-policy-bootstrap.sh](./docs/ironwood-policy-bootstrap.sh), which would need to run ahead of time in the project for each region where ironwood capacity is landing. 
+In order to support ironwood we need to have Workload Policy's attached to nodepool creation step, in order to work with the tpu-provisioner you will need Workload Policy resources in the project and region with the following syntax: `tpu-provisioner-$TPU_TOPOLOGY`, e.g. `tpu-provisioner-2x2x2` or `tpu-provisioner-8x8x16`. See the script in [./docs/ironwood-policy-bootstrap.sh](./docs/ironwood-policy-bootstrap.sh), which would need to run ahead of time in the project for each region where ironwood capacity is landing.
