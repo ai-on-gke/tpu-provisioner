@@ -58,10 +58,21 @@ import (
 	//+kubebuilder:scaffold:imports
 )
 
+const inClusterNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
+
+// getInClusterNamespace returns the namespace in which the controller is running.
+func getInClusterNamespace() string {
+	if ns, err := os.ReadFile(inClusterNamespacePath); err == nil {
+		return string(ns)
+	}
+	// Fallback to default namespace, for when not running in-cluster.
+	return "default"
+}
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -128,6 +139,8 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	syncPeriod := cfg.ManagerSyncPeriod
+	namespace := getInClusterNamespace()
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Metrics: server.Options{
 			BindAddress: metricsAddr,
@@ -149,6 +162,9 @@ func main() {
 					// are managed by this controller.
 					Label: labels.SelectorFromSet(labels.Set{cloud.LabelNodepoolManager: cloud.LabelNodepoolManagerTPUPodinator}),
 				},
+			},
+			DefaultNamespaces: map[string]cache.Config{
+				namespace: {},
 			},
 		},
 	})
@@ -294,6 +310,7 @@ func main() {
 		Provider:                    provider,
 		Concurrency:                 cfg.Concurrency,
 		StaticNodepoolCreateTimeout: cfg.StaticNodepoolCreateTimeout,
+		Namespace:                   namespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "StaticNodepoolReconciler")
 		os.Exit(1)

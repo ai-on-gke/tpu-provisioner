@@ -56,12 +56,28 @@ Give the Service Accounts permissions to administer GKE clusters.
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${PROVISIONER_SERVICE_ACCOUNT}" --role='roles/container.clusterAdmin'
 ```
 
+If using static nodepool provisioning, the `compute.viewer` role will be needed as well to allow the provisioner to list reservations:
+
+```bash
+gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${PROVISIONER_SERVICE_ACCOUNT}" --role='roles/compute.viewer'
+```
+
 Bind the GCP Service Account to the Kubernetes Service Account that will be attached to the controller Pod.
 
 ```sh
 gcloud iam service-accounts add-iam-policy-binding ${PROVISIONER_SERVICE_ACCOUNT} \
     --role roles/iam.workloadIdentityUser \
     --member "serviceAccount:${PROJECT_ID}.svc.id.goog[tpu-provisioner-system/tpu-provisioner-controller-manager]"
+```
+
+The tpu-provisioner service account will also need `iam.serviceAccountUser` on the default compute service account:
+
+```sh
+
+gcloud iam service-accounts add-iam-policy-binding ${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+    --member="serviceAccount:tpu-provisioner@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --role="roles/iam.serviceAccountUser" \
+    --project=${PROJECT_ID}
 ```
 
 ### Deployment directory setup

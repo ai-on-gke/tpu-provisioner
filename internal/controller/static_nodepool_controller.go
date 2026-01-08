@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
@@ -46,16 +47,16 @@ type StaticNodepoolReconciler struct {
 	Provider                    cloud.Provider
 	Concurrency                 int
 	StaticNodepoolCreateTimeout time.Duration
+	Namespace                   string
 }
 
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	lg := ctrllog.FromContext(ctx)
 
 	// Only reconcile if this configmap is the one we are looking for.
-	if req.Name != ConfigMapName {
+	if !strings.Contains(req.Name, ConfigMapName) || req.Namespace != r.Namespace {
 		return ctrl.Result{}, nil
 	}
 
@@ -116,7 +117,7 @@ func (r *StaticNodepoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
-			return object.GetName() == ConfigMapName
+			return strings.Contains(object.GetName(), ConfigMapName) && object.GetNamespace() == r.Namespace
 		})).
 		Complete(r)
 }
