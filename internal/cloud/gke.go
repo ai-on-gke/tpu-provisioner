@@ -685,7 +685,7 @@ func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*container
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string, config *StaticNodePoolConfig, concurrency int, timeout time.Duration) error {
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string, config *StaticNodePoolConfig, concurrency int) error {
 	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName)
 	reservation, err := g.Reservations.GetReservation(ctx, reservationName)
 	if err != nil {
@@ -719,9 +719,13 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 
 	subBlockCount := chipCount / 64
 
+	nodepoolNameSuffix := reservationName
+	if config.NodepoolNameSuffix != "" {
+		nodepoolNameSuffix = config.NodepoolNameSuffix
+	}
+
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var allErrors []error
+	errs := make(chan error, subBlockCount)
 	sem := make(chan struct{}, concurrency)
 
 	for i := 0; i < int(subBlockCount); i++ {
@@ -732,21 +736,17 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			nodePoolID := fmt.Sprintf("%s-%d", reservationName, i)
+			nodePoolID := fmt.Sprintf("%s-%d", nodepoolNameSuffix, i)
 			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName, config)
 			if err != nil {
-				mu.Lock()
-				allErrors = append(allErrors, fmt.Errorf("determining node pool for static reservation: %w", err))
-				mu.Unlock()
+				errs <- fmt.Errorf("determining node pool for static reservation: %w", err)
 				return
 			}
 			log.Info("Determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
 
 			npExists, err := g.checkNodePoolExists(ctx, np)
 			if err != nil {
-				mu.Lock()
-				allErrors = append(allErrors, fmt.Errorf("checking if node pool exists: %w", err))
-				mu.Unlock()
+				errs <- fmt.Errorf("checking if node pool exists: %w", err)
 				return
 			}
 			log.Info("Checked whether static node pool already exists",
@@ -759,11 +759,8 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 					Parent:   g.ClusterContext.ClusterName(),
 				}
 
-				createCtx, cancel := context.WithTimeout(ctx, timeout)
-				defer cancel()
-
 				log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
-				if err := g.NodePools.Create(createCtx, req, OpCallbacks{
+				if err := g.NodePools.Create(ctx, req, OpCallbacks{
 					ReqFailure: func(err error) {
 						log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
 					},
@@ -774,18 +771,23 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 						log.Info("successfully created static node pool", "nodePoolName", np.Name)
 					},
 				}); err != nil {
-					mu.Lock()
-					allErrors = append(allErrors, err)
-					mu.Unlock()
+					errs <- err
 				}
 			}
 		}(i)
 	}
 
+	log.Info("Waiting for all goroutines to finish ensuring static nodepools.")
 	wg.Wait()
+	close(errs)
+
+	var allErrors []error
+	for err := range errs {
+		allErrors = append(allErrors, err)
+	}
 
 	if len(allErrors) > 0 {
-		return fmt.Errorf("failed to create all nodepools: %v", allErrors)
+		return errors.Join(allErrors...)
 	}
 
 	return nil

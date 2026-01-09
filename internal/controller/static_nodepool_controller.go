@@ -98,7 +98,9 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var allErrors []error
 	for _, reservationName := range reservationNames {
 		lg.Info(fmt.Sprintf("Ensuring static nodepool for reservation: %s", reservationName))
-		if err := r.Provider.EnsureStaticNodePools(ctx, reservationName, &nodepoolConfig, r.Concurrency, r.StaticNodepoolCreateTimeout); err != nil {
+		createCtx, cancel := context.WithTimeout(ctx, r.StaticNodepoolCreateTimeout)
+		defer cancel()
+		if err := r.Provider.EnsureStaticNodePools(createCtx, reservationName, &nodepoolConfig, r.Concurrency); err != nil {
 			wrappedErr := fmt.Errorf("failed to ensure static nodepool for %s: %w", reservationName, err)
 			lg.Error(wrappedErr, "error ensuring static nodepool for reservation")
 			allErrors = append(allErrors, wrappedErr)

@@ -71,10 +71,10 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 
 	// First call, should create both node pools.
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", config, 1, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", config, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
-	if err := gke.EnsureStaticNodePools(ctx, "res-2", config, 1, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-2", config, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 
@@ -103,10 +103,10 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 
 	// Second call, should not create any new node pools.
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", config, 1, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", config, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
-	if err := gke.EnsureStaticNodePools(ctx, "res-2", config, 1, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-2", config, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {
@@ -118,13 +118,37 @@ func TestEnsureStaticNodePool(t *testing.T) {
 
 	// Modify a node pool and call again, should not create a new one.
 	np1.Config.MachineType = "different"
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", config, 1, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", config, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-res-1-0"]; got != 1 {
 		t.Errorf("expected 1 create for static-res-1-0, got %d", got)
 	}
 
+	// Test custom nodepool name
+	customConfig := &StaticNodePoolConfig{
+		MachineType:        "tpu7x-standard-4t",
+		Accelerator:        V7xSliceAccelerator,
+		Topology:           "4x4x4",
+		NodeCount:          16,
+		NodepoolNameSuffix: "custom-name",
+	}
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", customConfig, 1); err != nil {
+		t.Fatalf("EnsureStaticNodePools(): %v", err)
+	}
+	if got := svc.creates["static-custom-name-0"]; got != 1 {
+		t.Errorf("expected 1 create for static-custom-name-0, got %d", got)
+	}
+	if got := len(svc.nodePools); got != 3 {
+		t.Fatalf("expected 3 node pools, got %d", got)
+	}
+	npCustom := svc.nodePools["static-custom-name-0"]
+	if npCustom == nil {
+		t.Fatal("nodepool static-custom-name-0 not found")
+	}
+	if got, want := npCustom.Config.Labels[LabelProvisionerNodepoolID], "custom-name-0"; got != want {
+		t.Errorf("got label %q, want %q", got, want)
+	}
 }
 
 func newTestGKE(t *testing.T) (*GKE, *mockGKEService, *mockReservationService) {
