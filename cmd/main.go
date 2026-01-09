@@ -117,8 +117,6 @@ func main() {
 		Concurrency int `envconfig:"CONCURRENCY" default:"3"`
 
 		StaticNodepoolCreateTimeout time.Duration `envconfig:"STATIC_NODEPOOL_CREATE_TIMEOUT" default:"10m"`
-
-		ManagerSyncPeriod time.Duration `envconfig:"MANAGER_SYNC_PERIOD" default:"10m"`
 	}
 	envconfig.MustProcess("", &cfg)
 
@@ -138,7 +136,6 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	syncPeriod := cfg.ManagerSyncPeriod
 	namespace := getInClusterNamespace()
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -155,7 +152,6 @@ func main() {
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "ecaf1259.google.com",
 		Cache: cache.Options{
-			SyncPeriod: &syncPeriod,
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.Node{}: {
 					// Only listen for Nodes with label selectors indicating that they
