@@ -47,7 +47,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -68,7 +68,7 @@ var (
 
 func init() {
 	if enableSliceController {
-		utilruntime.Must(v1alpha1.AddToScheme(scheme))
+		utilruntime.Must(v1beta1.AddToScheme(scheme))
 	}
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme))

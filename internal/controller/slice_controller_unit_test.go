@@ -3,7 +3,7 @@ package controller
 import (
 	"testing"
 
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/google/go-cmp/cmp"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -18,7 +18,7 @@ func TestJobsetSlices(t *testing.T) {
 	tests := []struct {
 		name      string
 		jobSet    *jobset.JobSet
-		want      []v1alpha1.Slice
+		want      []v1beta1.Slice
 		wantErr   bool
 		errSubstr string
 	}{
@@ -55,7 +55,7 @@ func TestJobsetSlices(t *testing.T) {
 					},
 				},
 			},
-			want: []v1alpha1.Slice{
+			want: []v1beta1.Slice{
 				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4"),
 			},
 			wantErr: false,
@@ -93,7 +93,7 @@ func TestJobsetSlices(t *testing.T) {
 					},
 				},
 			},
-			want: []v1alpha1.Slice{
+			want: []v1beta1.Slice{
 				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4"),
 				makeSlice("js-test-jobset-test-uid-worker-1", "2x2x4"),
 				makeSlice("js-test-jobset-test-uid-worker-2", "2x2x4"),
@@ -153,7 +153,7 @@ func TestJobsetSlices(t *testing.T) {
 					},
 				},
 			},
-			want: []v1alpha1.Slice{
+			want: []v1beta1.Slice{
 				makeSlice("js-test-jobset-test-uid-worker-1-0", "2x2x4"),
 				makeSlice("js-test-jobset-test-uid-worker-1-1", "2x2x4"),
 				makeSlice("js-test-jobset-test-uid-worker-2-0", "2x2x2"),
@@ -346,7 +346,7 @@ func TestJobsetSlices(t *testing.T) {
 					},
 				},
 			},
-			want: []v1alpha1.Slice{
+			want: []v1beta1.Slice{
 				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4", "cube-1", "cube-2"),
 				makeSlice("js-test-jobset-test-uid-worker-1", "2x2x4", "cube-3", "cube-4"),
 			},
@@ -428,7 +428,7 @@ func TestJobsetSlices(t *testing.T) {
 					},
 				},
 			},
-			want: []v1alpha1.Slice{
+			want: []v1beta1.Slice{
 				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4", "cube-1", "cube-2"),
 				makeSlice("js-test-jobset-test-uid-worker-1", "2x2x4"),
 			},
@@ -467,7 +467,7 @@ func TestJobsetSlices(t *testing.T) {
 					},
 				},
 			},
-			want: []v1alpha1.Slice{
+			want: []v1beta1.Slice{
 				makeSliceWithJobSet("js-this-is-a-very-long-jobset-name--test-uid-long-repli-0", tpu7xAccelerator, "2x2x4", "this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", "default"),
 			},
 			wantErr: false,
@@ -525,7 +525,7 @@ func TestJobsetSlices(t *testing.T) {
 					},
 				},
 			},
-			want: []v1alpha1.Slice{
+			want: []v1beta1.Slice{
 				makeSlice("js-test-jobset-test-uid-v7x-worker-0", "2x2x4"),
 			},
 			wantErr: false,
@@ -673,35 +673,35 @@ func TestParseSliceSelection(t *testing.T) {
 func TestDiffSlices(t *testing.T) {
 	tests := []struct {
 		name         string
-		desired      []v1alpha1.Slice
-		existing     []v1alpha1.Slice
-		wantToDelete []v1alpha1.Slice
-		wantToCreate []v1alpha1.Slice
+		desired      []v1beta1.Slice
+		existing     []v1beta1.Slice
+		wantToDelete []v1beta1.Slice
+		wantToCreate []v1beta1.Slice
 	}{
 		{
 			name: "create new slices when none exist",
-			desired: []v1alpha1.Slice{
+			desired: []v1beta1.Slice{
 				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
 				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
 			},
-			existing:     []v1alpha1.Slice{},
+			existing:     []v1beta1.Slice{},
 			wantToDelete: nil,
-			wantToCreate: []v1alpha1.Slice{
+			wantToCreate: []v1beta1.Slice{
 				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
 				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
 			},
 		},
 		{
 			name: "delete slices with changed NodeSelector without creating replacements",
-			desired: []v1alpha1.Slice{
+			desired: []v1beta1.Slice{
 				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-5", "cube-6"),
 				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-7", "cube-8"),
 			},
-			existing: []v1alpha1.Slice{
+			existing: []v1beta1.Slice{
 				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
 				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
 			},
-			wantToDelete: []v1alpha1.Slice{
+			wantToDelete: []v1beta1.Slice{
 				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
 				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
 			},
@@ -709,11 +709,11 @@ func TestDiffSlices(t *testing.T) {
 		},
 		{
 			name: "no changes when NodeSelectors match",
-			desired: []v1alpha1.Slice{
+			desired: []v1beta1.Slice{
 				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
 				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
 			},
-			existing: []v1alpha1.Slice{
+			existing: []v1beta1.Slice{
 				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
 				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
 			},
@@ -736,18 +736,18 @@ func TestDiffSlices(t *testing.T) {
 }
 
 // Helper function to create a Slice object for testing
-func makeSlice(name, topology string, cubes ...string) v1alpha1.Slice {
+func makeSlice(name, topology string, cubes ...string) v1beta1.Slice {
 	return makeSliceWithAccel(name, tpu7xAccelerator, topology, cubes...)
 }
 
 // Helper function to create a Slice object with custom accelerator type
-func makeSliceWithAccel(name, accelType, topology string, cubes ...string) v1alpha1.Slice {
+func makeSliceWithAccel(name, accelType, topology string, cubes ...string) v1beta1.Slice {
 	return makeSliceWithJobSet(name, accelType, topology, "test-jobset", "default", cubes...)
 }
 
 // Helper function to create a Slice object with custom JobSet name and namespace
-func makeSliceWithJobSet(name, accelType, topology, jobsetName, jobsetNamespace string, cubes ...string) v1alpha1.Slice {
-	return v1alpha1.Slice{
+func makeSliceWithJobSet(name, accelType, topology, jobsetName, jobsetNamespace string, cubes ...string) v1beta1.Slice {
+	return v1beta1.Slice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
@@ -756,8 +756,8 @@ func makeSliceWithJobSet(name, accelType, topology, jobsetName, jobsetNamespace 
 				SliceOwnerNamespaceLabel: jobsetNamespace,
 			},
 		},
-		Spec: v1alpha1.SliceSpec{
-			Type:         v1alpha1.Type(accelType),
+		Spec: v1beta1.SliceSpec{
+			Type:         v1beta1.Type(accelType),
 			Topology:     topology,
 			PartitionIds: cubes,
 		},

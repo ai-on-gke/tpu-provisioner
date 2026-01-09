@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,7 +67,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Get all existing slices owned by this JobSet (using labels instead of owner references)
-	var existingSliceList v1alpha1.SliceList
+	var existingSliceList v1beta1.SliceList
 	if err := r.List(ctx, &existingSliceList,
 		client.MatchingLabels{
 			SliceOwnerKindLabel:      "jobset",
@@ -174,7 +174,7 @@ func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return true
 		})).
 		Watches(
-			&v1alpha1.Slice{},
+			&v1beta1.Slice{},
 			handler.EnqueueRequestsFromMapFunc(r.sliceToJobSetRequests),
 		).
 		Complete(r)
@@ -182,7 +182,7 @@ func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // sliceToJobSetRequests maps a Slice to its owning JobSet using labels
 func (r *SliceReconciler) sliceToJobSetRequests(ctx context.Context, obj client.Object) []reconcile.Request {
-	slice, ok := obj.(*v1alpha1.Slice)
+	slice, ok := obj.(*v1beta1.Slice)
 	if !ok {
 		return nil
 	}
@@ -210,8 +210,8 @@ func (r *SliceReconciler) sliceToJobSetRequests(ctx context.Context, obj client.
 	}
 }
 
-func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
-	var slices []v1alpha1.Slice
+func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, error) {
+	var slices []v1beta1.Slice
 
 	sliceSelection, err := parseSliceSelection(js)
 	if err != nil {
@@ -240,7 +240,7 @@ func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
 
 		cubeSelection := sliceSelection[rj.Name]
 		for i := 0; i < int(rj.Replicas); i++ {
-			s := v1alpha1.Slice{
+			s := v1beta1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: utils.SliceName(js.Name, string(js.UID), rj.Name, i),
 					Labels: map[string]string{
@@ -250,9 +250,9 @@ func jobsetSlices(js *jobset.JobSet) ([]v1alpha1.Slice, error) {
 						SliceOwnerNamespaceLabel: js.Namespace,
 					},
 				},
-				Spec: v1alpha1.SliceSpec{
+				Spec: v1beta1.SliceSpec{
 					// TODO: Check that this is the correct accelerator value to use.
-					Type: v1alpha1.Type(accel),
+					Type: v1beta1.Type(accel),
 					// TODO: check that this is the correct topology value to use.
 					Topology: topo,
 				},
@@ -284,6 +284,8 @@ func parseSliceSelection(js *jobset.JobSet) (map[string][][]string, error) {
 				return nil, fmt.Errorf(`slice selection should be of the format {"replicated_job_name": [["cube-1","cube-2"],["cube-3","cube-4"]]}: %w`, err)
 			}
 			return sliceSelection, nil
+		} else {
+			return nil, fmt.Errorf("missing slice selection annotation: %q", SliceSelectionAnnotation)
 		}
 	}
 	return make(map[string][][]string), nil
@@ -307,9 +309,9 @@ func partitionsEqual(a, b []string) bool {
 // Slices are considered different if their NodeSelectors differ.
 // When a slice needs to be deleted due to NodeSelector change, it is NOT included
 // in toCreate - the creation will happen in a subsequent reconciliation pass.
-func diffSlices(desired []v1alpha1.Slice, existing []v1alpha1.Slice) (toDelete, toCreate []v1alpha1.Slice) {
+func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice) (toDelete, toCreate []v1beta1.Slice) {
 	// Create a map of existing slices by name for quick lookup
-	existingMap := make(map[string]*v1alpha1.Slice)
+	existingMap := make(map[string]*v1beta1.Slice)
 	for i := range existing {
 		existingMap[existing[i].Name] = &existing[i]
 	}
@@ -334,7 +336,7 @@ func diffSlices(desired []v1alpha1.Slice, existing []v1alpha1.Slice) (toDelete, 
 
 // handleSyncMode handles the sync provisioning mode by suspending the JobSet
 // until all expected Slices are Ready, then unsuspending it.
-func (r *SliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet, desiredSlices []v1alpha1.Slice, existingSlices []v1alpha1.Slice) error {
+func (r *SliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet, desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice) error {
 	log := ctrllog.FromContext(ctx)
 
 	allReady := allSlicesReady(desiredSlices, existingSlices)
@@ -366,13 +368,13 @@ func (r *SliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet,
 }
 
 // allSlicesReady checks if all desired Slices exist and have the Ready condition set to true.
-func allSlicesReady(desiredSlices []v1alpha1.Slice, existingSlices []v1alpha1.Slice) bool {
+func allSlicesReady(desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice) bool {
 	if len(desiredSlices) == 0 {
 		return true
 	}
 
 	// Create a map of existing slices by name for quick lookup
-	existingMap := make(map[string]*v1alpha1.Slice)
+	existingMap := make(map[string]*v1beta1.Slice)
 	for i := range existingSlices {
 		existingMap[existingSlices[i].Name] = &existingSlices[i]
 	}
@@ -394,9 +396,9 @@ func allSlicesReady(desiredSlices []v1alpha1.Slice, existingSlices []v1alpha1.Sl
 }
 
 // isSliceReady checks if a Slice has the Ready condition set to true.
-func isSliceReady(slice *v1alpha1.Slice) bool {
+func isSliceReady(slice *v1beta1.Slice) bool {
 	for _, condition := range slice.Status.Conditions {
-		if condition.Type == v1alpha1.SliceStateConditionType &&
+		if condition.Type == v1beta1.SliceStateConditionType &&
 			condition.Status == metav1.ConditionTrue {
 			return true
 		}
@@ -405,7 +407,7 @@ func isSliceReady(slice *v1alpha1.Slice) bool {
 }
 
 // countReadySlices returns the number of Slices that have the Ready condition set to true.
-func countReadySlices(slices []v1alpha1.Slice) int {
+func countReadySlices(slices []v1beta1.Slice) int {
 	count := 0
 	for i := range slices {
 		if isSliceReady(&slices[i]) {

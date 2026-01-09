@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1alpha1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	"github.com/google/go-cmp/cmp"
@@ -23,7 +23,7 @@ import (
 // ExpectedSliceSpec embeds SliceSpec and adds a Replicas field to specify
 // how many Slices with this spec are expected.
 type ExpectedSliceSpec struct {
-	v1alpha1.SliceSpec
+	v1beta1.SliceSpec
 	Replicas int
 }
 
@@ -73,30 +73,41 @@ var _ = Describe("Slice controller", func() {
 		Entry("JobSet with slice provisioning enabled and v7x accelerator should create Slices", &testCase{
 			jobSet: constructJobSet("test-js-1",
 				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
-				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+				withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["test-js-1-worker-0"],["test-js-1-worker-1"]]}`),
+				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
 			),
 			wantSliceCreation: true,
 			expectedSlices: []ExpectedSliceSpec{
 				{
-					SliceSpec: v1alpha1.SliceSpec{
+					SliceSpec: v1beta1.SliceSpec{
 						Type:         "tpu7x",
-						Topology:     "2x2x4",
-						PartitionIds: nil,
+						Topology:     "4x4x4",
+						PartitionIds: []string{"test-js-1-worker-0"},
 					},
-					Replicas: 2,
+					Replicas: 1,
+				},
+				{
+					SliceSpec: v1beta1.SliceSpec{
+						Type:         "tpu7x",
+						Topology:     "4x4x4",
+						PartitionIds: []string{"test-js-1-worker-1"},
+					},
+					Replicas: 1,
 				},
 			},
 		}),
 		Entry("JobSet with slice provisioning enabled but no v7x accelerator should not create Slices", &testCase{
 			jobSet: constructJobSet("test-js-2",
 				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
-				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu-v6e", "2x2x4")),
+				withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["dummy-cube-0"]]}`),
+				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu-v6e", "4x4x4")),
 			),
 			wantSliceCreation: false,
 		}),
 		Entry("JobSet without slice provisioning annotation should not create Slices", &testCase{
 			jobSet: constructJobSet("test-js-3",
-				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+				withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["dummy-cube-0"]]}`),
+				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
 			),
 			wantSliceCreation: false,
 		}),
@@ -104,48 +115,75 @@ var _ = Describe("Slice controller", func() {
 			jobSet: constructJobSet("test-js-4",
 				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 				withLabel(utils.DisableAutoProvisioningLabel, "true"),
-				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+				withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["dummy-cube-0"]]}`),
+				withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
 			),
 			wantSliceCreation: false,
 		}),
 		Entry("JobSet with slice provisioning and multiple replicas should create multiple Slices", &testCase{
 			jobSet: constructJobSet("test-js-5",
 				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
-				withReplicatedJob("worker", 3, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+				withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["test-js-5-worker-0"],["test-js-5-worker-1"],["test-js-5-worker-2"]]}`),
+				withReplicatedJob("worker", 3, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
 			),
 			wantSliceCreation: true,
 			expectedSlices: []ExpectedSliceSpec{
 				{
-					SliceSpec: v1alpha1.SliceSpec{
+					SliceSpec: v1beta1.SliceSpec{
 						Type:         "tpu7x",
-						Topology:     "2x2x4",
-						PartitionIds: nil,
+						Topology:     "4x4x4",
+						PartitionIds: []string{"test-js-5-worker-0"},
 					},
-					Replicas: 3,
+					Replicas: 1,
+				},
+				{
+					SliceSpec: v1beta1.SliceSpec{
+						Type:         "tpu7x",
+						Topology:     "4x4x4",
+						PartitionIds: []string{"test-js-5-worker-1"},
+					},
+					Replicas: 1,
+				},
+				{
+					SliceSpec: v1beta1.SliceSpec{
+						Type:         "tpu7x",
+						Topology:     "4x4x4",
+						PartitionIds: []string{"test-js-5-worker-2"},
+					},
+					Replicas: 1,
 				},
 			},
 		}),
 		Entry("JobSet with slice provisioning and 2 replicated jobs should create Slices for both", &testCase{
 			jobSet: constructJobSet("test-js-6",
 				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
-				withReplicatedJob("worker-1", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
-				withReplicatedJob("worker-2", 1, makeJobTemplateWithTPU("tpu7x", "2x2x2")),
+				withAnnotation(controller.SliceSelectionAnnotation, `{"worker-1":[["test-js-6-worker-1-0"],["test-js-6-worker-1-1"]],"worker-2":[["test-js-6-worker-2-0"]]}`),
+				withReplicatedJob("worker-1", 2, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
+				withReplicatedJob("worker-2", 1, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
 			),
 			wantSliceCreation: true,
 			expectedSlices: []ExpectedSliceSpec{
 				{
-					SliceSpec: v1alpha1.SliceSpec{
+					SliceSpec: v1beta1.SliceSpec{
 						Type:         "tpu7x",
-						Topology:     "2x2x4",
-						PartitionIds: nil,
+						Topology:     "4x4x4",
+						PartitionIds: []string{"test-js-6-worker-1-0"},
 					},
-					Replicas: 2,
+					Replicas: 1,
 				},
 				{
-					SliceSpec: v1alpha1.SliceSpec{
+					SliceSpec: v1beta1.SliceSpec{
 						Type:         "tpu7x",
-						Topology:     "2x2x2",
-						PartitionIds: nil,
+						Topology:     "4x4x4",
+						PartitionIds: []string{"test-js-6-worker-1-1"},
+					},
+					Replicas: 1,
+				},
+				{
+					SliceSpec: v1beta1.SliceSpec{
+						Type:         "tpu7x",
+						Topology:     "4x4x4",
+						PartitionIds: []string{"test-js-6-worker-2-0"},
 					},
 					Replicas: 1,
 				},
@@ -155,22 +193,22 @@ var _ = Describe("Slice controller", func() {
 			jobSet: constructJobSet("test-js-7",
 				withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 				withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-1","cube-2"],["cube-3","cube-4"]]}`),
-				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+				withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "4x4x8")),
 			),
 			wantSliceCreation: true,
 			expectedSlices: []ExpectedSliceSpec{
 				{
-					SliceSpec: v1alpha1.SliceSpec{
+					SliceSpec: v1beta1.SliceSpec{
 						Type:         "tpu7x",
-						Topology:     "2x2x4",
+						Topology:     "4x4x8",
 						PartitionIds: []string{"cube-1", "cube-2"},
 					},
 					Replicas: 1,
 				},
 				{
-					SliceSpec: v1alpha1.SliceSpec{
+					SliceSpec: v1beta1.SliceSpec{
 						Type:         "tpu7x",
-						Topology:     "2x2x4",
+						Topology:     "4x4x8",
 						PartitionIds: []string{"cube-3", "cube-4"},
 					},
 					Replicas: 1,
@@ -198,7 +236,7 @@ var _ = Describe("Slice controller", func() {
 		js := constructJobSet("test-js-update",
 			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
 			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-1","cube-2"]]}`),
-			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "4x4x8")),
 		)
 		js.Namespace = ns.Name
 
@@ -208,9 +246,9 @@ var _ = Describe("Slice controller", func() {
 		By("Verifying initial Slices are created")
 		initialExpectedSlices := []ExpectedSliceSpec{
 			{
-				SliceSpec: v1alpha1.SliceSpec{
+				SliceSpec: v1beta1.SliceSpec{
 					Type:         "tpu7x",
-					Topology:     "2x2x4",
+					Topology:     "4x4x8",
 					PartitionIds: []string{"cube-1", "cube-2"},
 				},
 				Replicas: 1,
@@ -230,9 +268,9 @@ var _ = Describe("Slice controller", func() {
 		By("Verifying Slices are recreated with updated PartitionIds")
 		updatedExpectedSlices := []ExpectedSliceSpec{
 			{
-				SliceSpec: v1alpha1.SliceSpec{
+				SliceSpec: v1beta1.SliceSpec{
 					Type:         "tpu7x",
-					Topology:     "2x2x4",
+					Topology:     "4x4x8",
 					PartitionIds: []string{"cube-3", "cube-4"},
 				},
 				Replicas: 1,
@@ -259,7 +297,8 @@ var _ = Describe("Slice controller", func() {
 		// Create JobSet with slice provisioning
 		js := constructJobSet("test-js-deletion",
 			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
-			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["test-js-deletion-worker-0"],["test-js-deletion-worker-1"]]}`),
+			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
 		)
 		js.Namespace = ns.Name
 
@@ -269,12 +308,20 @@ var _ = Describe("Slice controller", func() {
 		By("Verifying Slices are created")
 		expectedSlices := []ExpectedSliceSpec{
 			{
-				SliceSpec: v1alpha1.SliceSpec{
+				SliceSpec: v1beta1.SliceSpec{
 					Type:         "tpu7x",
-					Topology:     "2x2x4",
-					PartitionIds: nil,
+					Topology:     "4x4x4",
+					PartitionIds: []string{"test-js-deletion-worker-0"},
 				},
-				Replicas: 2,
+				Replicas: 1,
+			},
+			{
+				SliceSpec: v1beta1.SliceSpec{
+					Type:         "tpu7x",
+					Topology:     "4x4x4",
+					PartitionIds: []string{"test-js-deletion-worker-1"},
+				},
+				Replicas: 1,
 			},
 		}
 		assertSlicesCreated(ctx, js, expectedSlices)
@@ -284,7 +331,7 @@ var _ = Describe("Slice controller", func() {
 
 		By("Verifying Slices are deleted")
 		Eventually(func() int {
-			var sliceList v1alpha1.SliceList
+			var sliceList v1beta1.SliceList
 			err := k8sClient.List(ctx, &sliceList)
 			if err != nil {
 				return -1
@@ -323,7 +370,8 @@ var _ = Describe("Slice controller", func() {
 		// Create JobSet with sync mode slice provisioning
 		js := constructJobSet("test-js-sync",
 			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeSync),
-			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["test-js-sync-worker-0"],["test-js-sync-worker-1"]]}`),
+			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
 		)
 		js.Namespace = ns.Name
 
@@ -333,12 +381,20 @@ var _ = Describe("Slice controller", func() {
 		By("Verifying Slices are created")
 		expectedSlices := []ExpectedSliceSpec{
 			{
-				SliceSpec: v1alpha1.SliceSpec{
+				SliceSpec: v1beta1.SliceSpec{
 					Type:         "tpu7x",
-					Topology:     "2x2x4",
-					PartitionIds: nil,
+					Topology:     "4x4x4",
+					PartitionIds: []string{"test-js-sync-worker-0"},
 				},
-				Replicas: 2,
+				Replicas: 1,
+			},
+			{
+				SliceSpec: v1beta1.SliceSpec{
+					Type:         "tpu7x",
+					Topology:     "4x4x4",
+					PartitionIds: []string{"test-js-sync-worker-1"},
+				},
+				Replicas: 1,
 			},
 		}
 		assertSlicesCreated(ctx, js, expectedSlices)
@@ -354,7 +410,7 @@ var _ = Describe("Slice controller", func() {
 		}, 5*time.Second, time.Second).Should(BeTrue())
 
 		By("Marking all Slices as Ready")
-		var sliceList v1alpha1.SliceList
+		var sliceList v1beta1.SliceList
 		err := k8sClient.List(ctx, &sliceList,
 			client.MatchingLabels{
 				controller.SliceOwnerKindLabel:      "jobset",
@@ -365,7 +421,7 @@ var _ = Describe("Slice controller", func() {
 		for _, slice := range sliceList.Items {
 			slice.Status.Conditions = []metav1.Condition{
 				{
-					Type:               v1alpha1.SliceStateConditionType,
+					Type:               v1beta1.SliceStateConditionType,
 					Status:             metav1.ConditionTrue,
 					Reason:             "Ready",
 					Message:            "Slice is ready",
@@ -404,7 +460,8 @@ var _ = Describe("Slice controller", func() {
 		// Create JobSet with async mode slice provisioning
 		js := constructJobSet("test-js-async",
 			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
-			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "2x2x4")),
+			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["test-js-async-worker-0"],["test-js-async-worker-1"]]}`),
+			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
 		)
 		js.Namespace = ns.Name
 
@@ -414,12 +471,20 @@ var _ = Describe("Slice controller", func() {
 		By("Verifying Slices are created")
 		expectedSlices := []ExpectedSliceSpec{
 			{
-				SliceSpec: v1alpha1.SliceSpec{
+				SliceSpec: v1beta1.SliceSpec{
 					Type:         "tpu7x",
-					Topology:     "2x2x4",
-					PartitionIds: nil,
+					Topology:     "4x4x4",
+					PartitionIds: []string{"test-js-async-worker-0"},
 				},
-				Replicas: 2,
+				Replicas: 1,
+			},
+			{
+				SliceSpec: v1beta1.SliceSpec{
+					Type:         "tpu7x",
+					Topology:     "4x4x4",
+					PartitionIds: []string{"test-js-async-worker-1"},
+				},
+				Replicas: 1,
 			},
 		}
 		assertSlicesCreated(ctx, js, expectedSlices)
@@ -531,7 +596,7 @@ func assertSlicesCreated(ctx context.Context, js *jobset.JobSet, expectedSlices 
 	}
 
 	Eventually(func() error {
-		var sliceList v1alpha1.SliceList
+		var sliceList v1beta1.SliceList
 		err := k8sClient.List(ctx, &sliceList)
 		if err != nil {
 			return fmt.Errorf("failed to list slices: %w", err)
@@ -596,7 +661,7 @@ func assertSlicesCreated(ctx context.Context, js *jobset.JobSet, expectedSlices 
 // assertSlicesNotCreated validates that no Slice resources were created for the given JobSet.
 func assertSlicesNotCreated(ctx context.Context, js *jobset.JobSet) {
 	Consistently(func() int {
-		var sliceList v1alpha1.SliceList
+		var sliceList v1beta1.SliceList
 		err := k8sClient.List(ctx, &sliceList)
 		if err != nil {
 			return 0

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,12 +55,6 @@ type SliceStatus struct {
 	// Conditions store the status conditions of the Slice
 	// +operator-sdk:csv:customresourcedefinitions:type=status
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// Populated to match the physical topology of block the Super-Slice is running on
-	BlockId string `json:"blockId,omitempty"`
-
-	// Populated to list of physical topology of sub-block the Super-Slice is running on
-	SubBlockIds []string `json:"subBlockIds,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -70,6 +64,7 @@ type SliceStatus struct {
 // +kubebuilder:printcolumn:name="Topology",type=string,JSONPath=`.spec.topology`
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:storageversion
 // Slice is the Schema for the slices API.
 type Slice struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -95,7 +90,4 @@ func init() {
 const (
 	// Represent the underlying hardware readiness status
 	SliceStateConditionType = "Ready"
-	// Represent whether the user/scheduler should take action on the slice
-	// The slice is in an error state that can't not automatically recover
-	SliceCreationFailedConditionType = "SliceCreationFailed"
 )
