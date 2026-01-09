@@ -297,13 +297,14 @@ func (g *GKE) checkExistingNodePoolState(ctx context.Context, desired *container
 }
 
 func (g *GKE) checkNodePoolExists(ctx context.Context, desired *containerv1beta1.NodePool) (bool, error) {
-	existing, err := g.NodePools.Get(ctx, desired.Name)
-
-	if existing == nil {
-		return false, nil
+	_, err := g.NodePools.Get(ctx, desired.Name)
+	if err != nil {
+		if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
+			return false, nil
+		}
+		return false, err
 	}
-
-	return true, err
+	return true, nil
 }
 
 func nodePoolHashesMatch(desired, existing *containerv1beta1.NodePool) (bool, error) {
@@ -504,7 +505,7 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 				EnableIntegrityMonitoring: true,
 				EnableSecureBoot:          g.ClusterContext.NodeSecureBoot,
 			},
-			Tags: []string{},
+			Tags: g.ClusterContext.NodeTags,
 			// NOTE: vendor/ was manually updated to include the field because
 			// it was not currently available at the time of writing:
 			SecondaryBootDisks:        secondaryDisks,

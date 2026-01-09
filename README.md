@@ -70,12 +70,12 @@ gcloud iam service-accounts add-iam-policy-binding ${PROVISIONER_SERVICE_ACCOUNT
     --member "serviceAccount:${PROJECT_ID}.svc.id.goog[tpu-provisioner-system/tpu-provisioner-controller-manager]"
 ```
 
-The tpu-provisioner service account will also need `iam.serviceAccountUser` on the default compute service account:
+The tpu-provisioner service account will also need `iam.serviceAccountUser` on the service account to be used by the nodes in the nodepool:
 
 ```sh
 
-gcloud iam service-accounts add-iam-policy-binding ${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
-    --member="serviceAccount:tpu-provisioner@${PROJECT_ID}.iam.gserviceaccount.com" \
+gcloud iam service-accounts add-iam-policy-binding ${NODE_SERVICE_ACCOUNT} \
+    --member="serviceAccount:${PROVISIONER_SERVICE_ACCOUNT}" \
     --role="roles/iam.serviceAccountUser" \
     --project=${PROJECT_ID}
 ```
