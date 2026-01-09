@@ -58,21 +58,10 @@ import (
 	//+kubebuilder:scaffold:imports
 )
 
-const inClusterNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
-
-// getInClusterNamespace returns the namespace in which the controller is running.
-func getInClusterNamespace() string {
-	if ns, err := os.ReadFile(inClusterNamespacePath); err == nil {
-		return string(ns)
-	}
-	// Fallback to default namespace, for when not running in-cluster.
-	return "default"
-}
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -118,6 +107,8 @@ func main() {
 
 		StaticNodepoolCreateConcurrency int           `envconfig:"STATIC_NODEPOOL_CREATE_CONCURRENCY" default:"3"`
 		StaticNodepoolCreateTimeout     time.Duration `envconfig:"STATIC_NODEPOOL_CREATE_TIMEOUT" default:"10m"`
+
+		PodNamespace string `envconfig:"POD_NAMESPACE"`
 	}
 	envconfig.MustProcess("", &cfg)
 
@@ -137,7 +128,9 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	namespace := getInClusterNamespace()
+	if cfg.PodNamespace == "" {
+		cfg.PodNamespace = "default"
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Metrics: server.Options{
@@ -159,9 +152,12 @@ func main() {
 					// are managed by this controller.
 					Label: labels.SelectorFromSet(labels.Set{cloud.LabelNodepoolManager: cloud.LabelNodepoolManagerTPUPodinator}),
 				},
-			},
-			DefaultNamespaces: map[string]cache.Config{
-				namespace: {},
+				// Apply namespace filter only to ConfigMaps.
+				&corev1.ConfigMap{}: {
+					Namespaces: map[string]cache.Config{
+						cfg.PodNamespace: {},
+					},
+				},
 			},
 		},
 	})
@@ -251,6 +247,7 @@ func main() {
 			setupLog.Error(err, "unable to create compute client")
 			os.Exit(1)
 		}
+
 		reservationsProvider := &cloud.ReservationProvider{
 			Service:   compute,
 			ProjectID: cfg.GCPProjectID,
@@ -307,7 +304,7 @@ func main() {
 		Provider:                    provider,
 		Concurrency:                 cfg.StaticNodepoolCreateConcurrency,
 		StaticNodepoolCreateTimeout: cfg.StaticNodepoolCreateTimeout,
-		Namespace:                   namespace,
+		Namespace:                   cfg.PodNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "StaticNodepoolReconciler")
 		os.Exit(1)
