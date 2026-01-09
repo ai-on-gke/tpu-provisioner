@@ -1391,3 +1391,101 @@ func Test_nodePoolSelectiveHash(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAdditionalNodeNetworks(t *testing.T) {
+	testCases := []struct {
+		name          string
+		input         string
+		expected      []*container.AdditionalNodeNetworkConfig
+		expectedError bool
+	}{
+		{
+			name:          "empty string",
+			input:         "",
+			expected:      nil,
+			expectedError: false,
+		},
+		{
+			name:  "single network",
+			input: "vpc1:subnet1",
+			expected: []*container.AdditionalNodeNetworkConfig{
+				{Network: "vpc1", Subnetwork: "subnet1"},
+			},
+			expectedError: false,
+		},
+		{
+			name:  "multiple networks",
+			input: "vpc1:subnet1,vpc2:subnet2",
+			expected: []*container.AdditionalNodeNetworkConfig{
+				{Network: "vpc1", Subnetwork: "subnet1"},
+				{Network: "vpc2", Subnetwork: "subnet2"},
+			},
+			expectedError: false,
+		},
+		{
+			name:  "with whitespace",
+			input: "  vpc1:subnet1,  vpc2:subnet2  ",
+			expected: []*container.AdditionalNodeNetworkConfig{
+				{Network: "vpc1", Subnetwork: "subnet1"},
+				{Network: "vpc2", Subnetwork: "subnet2"},
+			},
+			expectedError: false,
+		},
+		{
+			name:          "invalid format",
+			input:         "vpc1subnet1",
+			expected:      nil,
+			expectedError: true,
+		},
+		{
+			name:  "missing subnet",
+			input: "vpc1:",
+			expected: []*container.AdditionalNodeNetworkConfig{
+				{Network: "vpc1", Subnetwork: ""},
+			},
+			expectedError: false,
+		},
+		{
+			name:  "missing vpc",
+			input: ":subnet1",
+			expected: []*container.AdditionalNodeNetworkConfig{
+				{Network: "", Subnetwork: "subnet1"},
+			},
+			expectedError: false,
+		},
+		{
+			name:          "just a comma",
+			input:         ",",
+			expected:      nil,
+			expectedError: false,
+		},
+		{
+			name:  "trailing comma",
+			input: "vpc1:subnet1,",
+			expected: []*container.AdditionalNodeNetworkConfig{
+				{Network: "vpc1", Subnetwork: "subnet1"},
+			},
+			expectedError: false,
+		},
+		{
+			name:  "leading comma",
+			input: ",vpc1:subnet1",
+			expected: []*container.AdditionalNodeNetworkConfig{
+				{Network: "vpc1", Subnetwork: "subnet1"},
+			},
+			expectedError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parseAdditionalNodeNetworks(tc.input)
+			if (err != nil) != tc.expectedError {
+				t.Fatalf("parseAdditionalNodeNetworks() error = %v, wantErr %v", err, tc.expectedError)
+			}
+			if diff := cmp.Diff(tc.expected, result); diff != "" {
+				t.Errorf("parseAdditionalNodeNetworks() returned diff (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

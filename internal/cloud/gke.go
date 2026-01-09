@@ -64,6 +64,7 @@ const (
 	maxPodsPerNode = 15
 
 	// Constants for node pool naming conventions.
+	StaticNodepoolPrefix  = "static-"
 	maxJobSetPrefixLength = 34
 	jobKeySuffixLength    = 5
 )
@@ -847,7 +848,7 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 	// Nodepool name must be <= 40 characters.
 	// 'static-' prefix in nodepool name is used to exclude static nodepools from the garbage collection loop
 	// used for nodepools that are dynamically provisioned based on workload requirements
-	name := fmt.Sprintf("static-%s", nodePoolID)
+	name := fmt.Sprintf(StaticNodepoolPrefix+"%s", nodePoolID)
 	if len(name) > 40 {
 		name = name[:40]
 	}
