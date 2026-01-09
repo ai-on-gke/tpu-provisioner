@@ -116,7 +116,8 @@ func main() {
 
 		Concurrency int `envconfig:"CONCURRENCY" default:"3"`
 
-		StaticNodepoolCreateTimeout time.Duration `envconfig:"STATIC_NODEPOOL_CREATE_TIMEOUT" default:"10m"`
+		StaticNodepoolCreateConcurrency int           `envconfig:"STATIC_NODEPOOL_CREATE_CONCURRENCY" default:"3"`
+		StaticNodepoolCreateTimeout     time.Duration `envconfig:"STATIC_NODEPOOL_CREATE_TIMEOUT" default:"10m"`
 	}
 	envconfig.MustProcess("", &cfg)
 
@@ -304,7 +305,7 @@ func main() {
 		Scheme:                      mgr.GetScheme(),
 		Recorder:                    mgr.GetEventRecorderFor("tpu-provisioner"),
 		Provider:                    provider,
-		Concurrency:                 cfg.Concurrency,
+		Concurrency:                 cfg.StaticNodepoolCreateConcurrency,
 		StaticNodepoolCreateTimeout: cfg.StaticNodepoolCreateTimeout,
 		Namespace:                   namespace,
 	}).SetupWithManager(mgr); err != nil {

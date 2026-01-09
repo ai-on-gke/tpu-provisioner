@@ -48,7 +48,7 @@ func (g *GKENodePoolService) Create(ctx context.Context, req *containerv1beta1.C
 		return fmt.Errorf("do: %w", err)
 	}
 
-	if err := waitForGkeOp(ctx, g.Service, g.ClusterContext, op); err != nil {
+	if err := waitForGkeOp(g.Service, g.ClusterContext, op); err != nil {
 		if callbacks.OpFailure != nil {
 			callbacks.OpFailure(err)
 		}
@@ -76,7 +76,7 @@ func (g *GKENodePoolService) Delete(ctx context.Context, name string, callbacks 
 		return fmt.Errorf("deleting node pool %q: %w", name, err)
 	}
 
-	if err := waitForGkeOp(ctx, g.Service, g.ClusterContext, op); err != nil {
+	if err := waitForGkeOp(g.Service, g.ClusterContext, op); err != nil {
 		if callbacks.OpFailure != nil {
 			callbacks.OpFailure(err)
 		}
