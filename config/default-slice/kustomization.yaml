@@ -15,7 +15,7 @@ patchesJson6902:
       path: /rules/-
       value:
         apiGroups:
-        - slice.accelerator.gke.io
+        - accelerator.gke.io
         resources:
         - slices
         verbs:
@@ -24,7 +24,7 @@ patchesJson6902:
       path: /rules/-
       value:
         apiGroups:
-        - slice.accelerator.gke.io
+        - accelerator.gke.io
         resources:
         - slices/status
         verbs:
