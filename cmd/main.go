@@ -39,7 +39,6 @@ import (
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
 
-	computev1 "google.golang.org/api/compute/v1"
 	containerv1beta1 "google.golang.org/api/container/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -242,21 +241,8 @@ func main() {
 			Service:        containers,
 		}
 
-		compute, err := computev1.NewService(context.Background())
-		if err != nil {
-			setupLog.Error(err, "unable to create compute client")
-			os.Exit(1)
-		}
-
-		reservationsProvider := &cloud.ReservationProvider{
-			Service:   compute,
-			ProjectID: cfg.GCPProjectID,
-			Zone:      cfg.GCPZone,
-		}
-
 		gkeProvider := &cloud.GKE{
 			NodePools:      nodePoolsService,
-			Reservations:   reservationsProvider,
 			ClusterContext: clusterCtx,
 			Recorder:       mgr.GetEventRecorderFor("tpu-provisioner"),
 		}

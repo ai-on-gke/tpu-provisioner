@@ -38,6 +38,16 @@ const (
 	ConfigMapName = "static-nodepools-config"
 )
 
+type GscBlock struct {
+	Name         string `yaml:"name"`
+	NumSubblocks int    `yaml:"numSubblocks"`
+}
+
+type Reservation struct {
+	Name      string     `yaml:"name"`
+	GscBlocks []GscBlock `yaml:"gscBlocks"`
+}
+
 // StaticNodepoolReconciler reconciles static nodepools based on a ConfigMap.
 type StaticNodepoolReconciler struct {
 	client.Client
@@ -77,8 +87,8 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	var reservationNames []string
-	if err := yaml.Unmarshal([]byte(reservationsYAML), &reservationNames); err != nil {
+	var reservations []Reservation
+	if err := yaml.Unmarshal([]byte(reservationsYAML), &reservations); err != nil {
 		lg.Error(err, "failed to unmarshal reservations from configmap", "configmap", req.NamespacedName.String())
 		return ctrl.Result{}, nil
 	}
@@ -96,14 +106,16 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	var allErrors []error
-	for _, reservationName := range reservationNames {
-		lg.Info(fmt.Sprintf("Ensuring static nodepool for reservation: %s", reservationName))
-		createCtx, cancel := context.WithTimeout(ctx, r.StaticNodepoolCreateTimeout)
-		defer cancel()
-		if err := r.Provider.EnsureStaticNodePools(createCtx, reservationName, &nodepoolConfig, r.Concurrency); err != nil {
-			wrappedErr := fmt.Errorf("failed to ensure static nodepool for %s: %w", reservationName, err)
-			lg.Error(wrappedErr, "error ensuring static nodepool for reservation")
-			allErrors = append(allErrors, wrappedErr)
+	for _, reservation := range reservations {
+		for _, gscBlock := range reservation.GscBlocks {
+			lg.Info(fmt.Sprintf("Ensuring static nodepool for gscBlock: %s", gscBlock.Name))
+			createCtx, cancel := context.WithTimeout(ctx, r.StaticNodepoolCreateTimeout)
+			defer cancel()
+			if err := r.Provider.EnsureStaticNodePools(createCtx, reservation.Name, gscBlock.Name, gscBlock.NumSubblocks, &nodepoolConfig, r.Concurrency); err != nil {
+				wrappedErr := fmt.Errorf("failed to ensure static nodepool for %s: %w", gscBlock.Name, err)
+				lg.Error(wrappedErr, "error ensuring static nodepool for gscBlock")
+				allErrors = append(allErrors, wrappedErr)
+			}
 		}
 	}
 

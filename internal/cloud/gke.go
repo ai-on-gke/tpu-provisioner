@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	computev1 "google.golang.org/api/compute/v1"
 	containerv1beta1 "google.golang.org/api/container/v1beta1"
 	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
@@ -73,17 +72,12 @@ var _ Provider = &GKE{}
 
 type GKE struct {
 	NodePools      NodePoolService
-	Reservations   ReservationProviderAPI
 	ClusterContext GKEContext
 	Recorder       record.EventRecorder
 
 	inProgressCreatesNPName sync.Map
 	inProgressCreatesJobKey sync.Map
 	inProgressDeletesNPName sync.Map
-}
-
-type ReservationProviderAPI interface {
-	GetReservation(ctx context.Context, name string) (*computev1.Reservation, error)
 }
 
 func (g *GKE) NodePoolLabelKey() string { return GKENodePoolNameLabel }
@@ -688,50 +682,14 @@ func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*container
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string, config *StaticNodePoolConfig, concurrency int) error {
-	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName)
-	reservation, err := g.Reservations.GetReservation(ctx, reservationName)
-	if err != nil {
-		return fmt.Errorf("getting reservation %s: %w", reservationName, err)
-	}
-
-	if reservation == nil {
-		log.Info("Reservation not found, skipping", "reservationName", reservationName)
-		return nil
-	}
-
-	var chipCount int64
-	// Check for specific reservation properties
-	if reservation.SpecificReservation != nil &&
-		reservation.SpecificReservation.InstanceProperties != nil &&
-		len(reservation.SpecificReservation.InstanceProperties.GuestAccelerators) > 0 {
-		chipCount = reservation.SpecificReservation.InstanceProperties.GuestAccelerators[0].AcceleratorCount
-	} else if reservation.AggregateReservation != nil &&
-		len(reservation.AggregateReservation.ReservedResources) > 0 &&
-		reservation.AggregateReservation.ReservedResources[0].Accelerator != nil {
-		chipCount = reservation.AggregateReservation.ReservedResources[0].Accelerator.AcceleratorCount
-	} else {
-		log.Info("Reservation has no supported specific or aggregate reservation properties with accelerators, skipping", "reservationName", reservationName)
-		return nil
-	}
-
-	if chipCount == 0 {
-		log.Info("Could not determine chip count from reservation, skipping", "reservationName", reservationName)
-		return nil
-	}
-
-	subBlockCount := chipCount / 64
-
-	nodepoolNameSuffix := reservationName
-	if config.NodepoolNameSuffix != "" {
-		nodepoolNameSuffix = config.NodepoolNameSuffix
-	}
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error {
+	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName, "blockName", blockName)
 
 	var wg sync.WaitGroup
-	errs := make(chan error, subBlockCount)
+	errs := make(chan error, numSubblocks)
 	sem := make(chan struct{}, concurrency)
 
-	for i := 0; i < int(subBlockCount); i++ {
+	for i := 0; i < numSubblocks; i++ {
 		wg.Add(1)
 		sem <- struct{}{}
 
@@ -739,8 +697,9 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName string,
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			nodePoolID := fmt.Sprintf("%s-%d", nodepoolNameSuffix, i)
-			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationName, config)
+			nodePoolID := fmt.Sprintf("%s-%d", blockName, i)
+			reservationToConsume := fmt.Sprintf("%s/reservationBlocks/%s", reservationName, blockName)
+			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationToConsume, config)
 			if err != nil {
 				errs <- fmt.Errorf("determining node pool for static reservation: %w", err)
 				return
