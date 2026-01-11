@@ -1,6 +1,7 @@
 package controllertest
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -13,8 +14,9 @@ var _ cloud.Provider = &mockProvider{}
 
 type mockProvider struct {
 	sync.Mutex
-	created map[types.NamespacedName]bool
-	deleted map[string]time.Time
+	created                map[types.NamespacedName]bool
+	deleted                map[string]time.Time
+	staticNodepoolsCreated map[string]bool
 
 	cloud.Provider
 }
@@ -28,10 +30,23 @@ func (p *mockProvider) EnsureNodePoolForPod(pod *corev1.Pod, _ string) error {
 	return nil
 }
 
+func (p *mockProvider) EnsureStaticNodePools(ctx context.Context, reservationName string, gscBlockName string, numSubblocks int, nodepoolConfig *cloud.StaticNodePoolConfig, concurrency int) error {
+	p.Lock()
+	defer p.Unlock()
+	p.staticNodepoolsCreated[gscBlockName] = true
+	return nil
+}
+
 func (p *mockProvider) getCreated(nn types.NamespacedName) bool {
 	p.Lock()
 	defer p.Unlock()
 	return p.created[nn]
+}
+
+func (p *mockProvider) getStaticNodepoolsCreated(gscBlockName string) bool {
+	p.Lock()
+	defer p.Unlock()
+	return p.staticNodepoolsCreated[gscBlockName]
 }
 
 func (p *mockProvider) DeleteNodePoolForNode(node *corev1.Node, _ string) error {

@@ -48,20 +48,23 @@ var (
 	k8sClient client.Client
 	testEnv   *envtest.Environment
 	provider  = &mockProvider{
-		created: make(map[types.NamespacedName]bool),
-		deleted: make(map[string]time.Time),
+		created:                make(map[types.NamespacedName]bool),
+		deleted:                make(map[string]time.Time),
+		staticNodepoolsCreated: make(map[string]bool),
 	}
 	ctx    context.Context
 	cancel context.CancelFunc
 )
 
 const (
-	resourceName          = "test.com/tpu"
-	minNodeLifetime       = time.Second
-	nodepoolDeletionDelay = 5 * time.Second
-	timeout               = time.Second * 10
-	duration              = time.Second * 10
-	interval              = time.Millisecond * 250
+	resourceName                = "test.com/tpu"
+	minNodeLifetime             = time.Second
+	nodepoolDeletionDelay       = 5 * time.Second
+	staticNodepoolCreateTimeout = 10 * time.Second
+	timeout                     = time.Second * 10
+	duration                    = time.Second * 10
+	interval                    = time.Millisecond * 250
+	testNamespace               = "default"
 )
 
 func TestAPIs(t *testing.T) {
@@ -122,6 +125,16 @@ var _ = BeforeSuite(func() {
 			MinLifetime:       minNodeLifetime,
 			PoolDeletionDelay: nodepoolDeletionDelay,
 		},
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
+	err = (&controller.StaticNodepoolReconciler{
+		Client:                      mgr.GetClient(),
+		Scheme:                      mgr.GetScheme(),
+		Recorder:                    mgr.GetEventRecorderFor("tpu-provisioner-static-nodepool-reconciler"),
+		Provider:                    provider,
+		StaticNodepoolCreateTimeout: staticNodepoolCreateTimeout,
+		Namespace:                   testNamespace,
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
