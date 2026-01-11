@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"strings"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
@@ -14,6 +16,11 @@ const (
 	tpu7xAccelerator  = "tpu7x"
 	tpuV7xAccelerator = "tpu-v7x"
 )
+
+// isStaticNodePool returns true if the nodepool has a name with prefix 'static-', otherwise it returns false.
+func isStaticNodePool(nodePoolName string) bool {
+	return strings.HasPrefix(nodePoolName, "static-")
+}
 
 func isPending(p *corev1.Pod) bool {
 	return p.Status.Phase == corev1.PodPending

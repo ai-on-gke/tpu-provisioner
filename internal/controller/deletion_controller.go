@@ -99,6 +99,11 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
+	if isStaticNodePool(nodePoolName) {
+		// lg.Info("Skipping deletion of static node pool", "nodePoolName", nodePoolName)
+		return ctrl.Result{}, nil
+	}
+
 	// Ensure the JobSet whose pods created this node pool is either gone, completed, or failed before
 	// deleting the node pool.
 	jobSetName, exists := node.Labels[cloud.LabelJobSetName]

@@ -42,6 +42,7 @@ import (
 
 	containerv1beta1 "google.golang.org/api/container/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -110,6 +111,11 @@ func main() {
 		PodResourceType string `envconfig:"POD_RESOURCE_TYPE" default:"google.com/tpu"`
 
 		Concurrency int `envconfig:"CONCURRENCY" default:"3"`
+
+		StaticNodepoolCreateConcurrency int           `envconfig:"STATIC_NODEPOOL_CREATE_CONCURRENCY" default:"3"`
+		StaticNodepoolCreateTimeout     time.Duration `envconfig:"STATIC_NODEPOOL_CREATE_TIMEOUT" default:"10m"`
+
+		PodNamespace string `envconfig:"POD_NAMESPACE"`
 	}
 	envconfig.MustProcess("", &cfg)
 
@@ -128,6 +134,10 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if cfg.PodNamespace == "" {
+		cfg.PodNamespace = "default"
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Metrics: server.Options{
@@ -150,6 +160,13 @@ func main() {
 					// are managed by this controller.
 					Label: labels.SelectorFromSet(labels.Set{cloud.LabelNodepoolManager: cloud.LabelNodepoolManagerTPUPodinator}),
 				},
+				// Filter based on ConfigMap name.
+				&corev1.ConfigMap{}: {
+					Field: fields.SelectorFromSet(fields.Set{"metadata.name": controller.ConfigMapName}),
+					Namespaces: map[string]cache.Config{
+						cfg.PodNamespace: {},
+					},
+				},
 			},
 		},
 	})
@@ -157,6 +174,7 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+	ctx := ctrl.SetupSignalHandler()
 
 	var provider cloud.Provider
 	switch p := strings.ToLower(cfg.Provider); p {
@@ -233,11 +251,12 @@ func main() {
 			Service:        containers,
 		}
 
-		provider = &cloud.GKE{
+		gkeProvider := &cloud.GKE{
 			NodePools:      nodePoolsService,
 			ClusterContext: clusterCtx,
 			Recorder:       mgr.GetEventRecorderFor("tpu-provisioner"),
 		}
+		provider = gkeProvider
 	case "mock":
 		provider = &cloud.Mock{}
 	default:
@@ -285,6 +304,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.StaticNodepoolReconciler{
+		Client:                      mgr.GetClient(),
+		Scheme:                      mgr.GetScheme(),
+		Recorder:                    mgr.GetEventRecorderFor("tpu-provisioner"),
+		Provider:                    provider,
+		Concurrency:                 cfg.StaticNodepoolCreateConcurrency,
+		StaticNodepoolCreateTimeout: cfg.StaticNodepoolCreateTimeout,
+		Namespace:                   cfg.PodNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "StaticNodepoolReconciler")
+		os.Exit(1)
+	}
+
 	// Register webhook handlers
 	jobWebhook := &jobwebhook.JobMutationHandler{
 		Decoder: admission.NewDecoder(scheme),
@@ -301,7 +333,6 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
-	ctx := ctrl.SetupSignalHandler()
 
 	gc := &controller.NodePoolGarbageCollector{
 		Interval: time.Minute,

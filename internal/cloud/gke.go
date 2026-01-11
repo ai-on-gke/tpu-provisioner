@@ -63,6 +63,7 @@ const (
 	maxPodsPerNode = 15
 
 	// Constants for node pool naming conventions.
+	StaticNodepoolPrefix  = "static-"
 	maxJobSetPrefixLength = 34
 	jobKeySuffixLength    = 5
 )
@@ -72,12 +73,11 @@ var _ Provider = &GKE{}
 type GKE struct {
 	NodePools      NodePoolService
 	ClusterContext GKEContext
+	Recorder       record.EventRecorder
 
-	Recorder record.EventRecorder
-
-	inProgressDeletesNPName sync.Map
 	inProgressCreatesNPName sync.Map
 	inProgressCreatesJobKey sync.Map
+	inProgressDeletesNPName sync.Map
 }
 
 func (g *GKE) NodePoolLabelKey() string { return GKENodePoolNameLabel }
@@ -88,7 +88,7 @@ func (g *GKE) EnsureNodePoolForPod(p *corev1.Pod, why string) error {
 		return fmt.Errorf("determining node pool for pod: %w", err)
 	}
 
-	existingNPState, err := g.checkExistingNodePool(context.TODO(), np)
+	existingNPState, err := g.checkExistingNodePoolState(context.TODO(), np)
 	if err != nil {
 		return fmt.Errorf("checking if node pool exists: %w", err)
 	}
@@ -174,23 +174,24 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 	}
 
 	for _, np := range resp.NodePools {
+		var createdForJobSet types.NamespacedName
 		jsName, exists := np.Config.Labels[LabelJobSetName]
-		if !exists {
-			jsName = np.Config.Labels[LabelProvisionerNodepoolID]
-		}
-		jsNamespace, exists := np.Config.Labels[LabelJobSetNamespace]
-		if !exists {
-			jsNamespace = "default"
+		if exists {
+			jsNamespace, exists := np.Config.Labels[LabelJobSetNamespace]
+			if !exists {
+				jsNamespace = "default"
+			}
+			createdForJobSet = types.NamespacedName{
+				Name:      jsName,
+				Namespace: jsNamespace,
+			}
 		}
 
 		refs = append(refs, NodePoolRef{
-			Name:    np.Name,
-			Error:   np.Status == "ERROR",
-			Message: np.StatusMessage,
-			CreatedForJobSet: types.NamespacedName{
-				Name:      jsName,
-				Namespace: jsNamespace,
-			},
+			Name:             np.Name,
+			Error:            np.Status == "ERROR",
+			Message:          np.StatusMessage,
+			CreatedForJobSet: createdForJobSet,
 		})
 	}
 
@@ -265,8 +266,9 @@ const (
 	nodePoolStateExistsAndStopping
 )
 
-func (g *GKE) checkExistingNodePool(ctx context.Context, desired *containerv1beta1.NodePool) (nodePoolState, error) {
+func (g *GKE) checkExistingNodePoolState(ctx context.Context, desired *containerv1beta1.NodePool) (nodePoolState, error) {
 	existing, err := g.NodePools.Get(ctx, desired.Name)
+
 	if err == nil {
 		match, err := nodePoolHashesMatch(desired, existing)
 		if err != nil {
@@ -281,11 +283,22 @@ func (g *GKE) checkExistingNodePool(ctx context.Context, desired *containerv1bet
 	if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
 		return nodePoolStateNotExists, nil
 	}
-	if existing.Status == "STOPPING" {
+	if existing != nil && existing.Status == "STOPPING" {
 		return nodePoolStateExistsAndStopping, nil
 	}
 
 	return nodePoolStateUnknown, err
+}
+
+func (g *GKE) checkNodePoolExists(ctx context.Context, desired *containerv1beta1.NodePool) (bool, error) {
+	_, err := g.NodePools.Get(ctx, desired.Name)
+	if err != nil {
+		if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func nodePoolHashesMatch(desired, existing *containerv1beta1.NodePool) (bool, error) {
@@ -433,27 +446,13 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 	}
 
 	var networkConfig *containerv1beta1.NodeNetworkConfig
-	var additionalNodeNetworks []*containerv1beta1.AdditionalNodeNetworkConfig
-	// additional-node-networks: "vpc1:subnet1, vpc2:subnet2"
 	additionalNodeNetworksCSV := g.ClusterContext.NodeAdditionalNetworks
 	if getAnnotation(p, AnnotationAdditionalNodeNetworks) != "" {
 		additionalNodeNetworksCSV = getAnnotation(p, AnnotationAdditionalNodeNetworks)
 	}
-	for _, pair := range strings.Split(additionalNodeNetworksCSV, ",") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-
-		netAndSubnet := strings.SplitN(pair, ":", 2)
-		if len(netAndSubnet) != 2 {
-			return nil, fmt.Errorf("invalid additional network annotation: %v", pair)
-		}
-
-		additionalNodeNetworks = append(additionalNodeNetworks, &containerv1beta1.AdditionalNodeNetworkConfig{
-			Network:    strings.TrimSpace(netAndSubnet[0]),
-			Subnetwork: strings.TrimSpace(netAndSubnet[1]),
-		})
+	additionalNodeNetworks, err := parseAdditionalNodeNetworks(additionalNodeNetworksCSV)
+	if err != nil {
+		return nil, err
 	}
 	if len(additionalNodeNetworks) > 0 {
 		networkConfig = &containerv1beta1.NodeNetworkConfig{
@@ -629,12 +628,12 @@ func tpuMachineType(accel string, tpuRequest int) (string, error) {
 	return "", fmt.Errorf("invalid accelerator: %v", accel)
 }
 
-func waitForGkeOp(svc *containerv1beta1.Service, c GKEContext, operation *containerv1beta1.Operation) error {
+func waitForGkeOp(ctx context.Context, svc *containerv1beta1.Service, c GKEContext, operation *containerv1beta1.Operation) error {
 	operationWaitTimeout := 30 * time.Minute
 	operationPollInterval := 5 * time.Second
 
 	for start := time.Now(); time.Since(start) < operationWaitTimeout; time.Sleep(operationPollInterval) {
-		if op, err := svc.Projects.Locations.Operations.Get(c.OpName(operation.Name)).Do(); err == nil {
+		if op, err := svc.Projects.Locations.Operations.Get(c.OpName(operation.Name)).Context(ctx).Do(); err == nil {
 			if op.Status == "DONE" {
 				return nil
 			}
@@ -658,6 +657,226 @@ func getAnnotation(p *corev1.Pod, key string) string {
 		return ""
 	}
 	return p.Annotations[key]
+}
+
+func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*containerv1beta1.AdditionalNodeNetworkConfig, error) {
+	var additionalNodeNetworks []*containerv1beta1.AdditionalNodeNetworkConfig
+	// additional-node-networks: "vpc1:subnet1, vpc2:subnet2"
+	for _, pair := range strings.Split(additionalNodeNetworksCSV, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+
+		netAndSubnet := strings.SplitN(pair, ":", 2)
+		if len(netAndSubnet) != 2 {
+			return nil, fmt.Errorf("invalid additional network annotation: %v", pair)
+		}
+
+		additionalNodeNetworks = append(additionalNodeNetworks, &containerv1beta1.AdditionalNodeNetworkConfig{
+			Network:    strings.TrimSpace(netAndSubnet[0]),
+			Subnetwork: strings.TrimSpace(netAndSubnet[1]),
+		})
+	}
+	return additionalNodeNetworks, nil
+}
+
+// EnsureStaticNodePools provisions all the node pools for a given reservation.
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error {
+	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName, "blockName", blockName)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, numSubblocks)
+	sem := make(chan struct{}, concurrency)
+
+	for i := 0; i < numSubblocks; i++ {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			nodePoolID := fmt.Sprintf("%s-%d", blockName, i)
+			reservationToConsume := fmt.Sprintf("%s/reservationBlocks/%s", reservationName, blockName)
+			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationToConsume, config)
+			if err != nil {
+				errs <- fmt.Errorf("determining node pool for static reservation: %w", err)
+				return
+			}
+			log.Info("Determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
+
+			npExists, err := g.checkNodePoolExists(ctx, np)
+			if err != nil {
+				errs <- fmt.Errorf("checking if node pool exists: %w", err)
+				return
+			}
+			log.Info("Checked whether static node pool already exists",
+				"nodePoolName", np.Name, "existingNodePoolState", npExists,
+			)
+
+			if !npExists {
+				req := &containerv1beta1.CreateNodePoolRequest{
+					NodePool: np,
+					Parent:   g.ClusterContext.ClusterName(),
+				}
+
+				log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
+				if err := g.NodePools.Create(ctx, req, OpCallbacks{
+					ReqFailure: func(err error) {
+						log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
+					},
+					OpFailure: func(err error) {
+						log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
+					},
+					Success: func() {
+						log.Info("successfully created static node pool", "nodePoolName", np.Name)
+					},
+				}); err != nil {
+					errs <- err
+				}
+			}
+		}(i)
+	}
+
+	log.Info("Waiting for all goroutines to finish ensuring static nodepools.")
+	wg.Wait()
+	close(errs)
+
+	var allErrors []error
+	for err := range errs {
+		allErrors = append(allErrors, err)
+	}
+
+	if len(allErrors) > 0 {
+		return errors.Join(allErrors...)
+	}
+
+	return nil
+}
+
+func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume string, config *StaticNodePoolConfig) (*containerv1beta1.NodePool, error) {
+	labels := map[string]string{
+		LabelNodepoolManager:       LabelNodepoolManagerTPUPodinator,
+		LabelProvisionerNodepoolID: nodePoolID,
+	}
+	for k, v := range config.NodeLabels {
+		labels[k] = v
+	}
+
+	reservation := &containerv1beta1.ReservationAffinity{
+		ConsumeReservationType: "SPECIFIC_RESERVATION",
+		Key:                    "compute.googleapis.com/reservation-name",
+		Values: []string{
+			reservationToConsume,
+		},
+	}
+
+	var secondaryDisks []*containerv1beta1.SecondaryBootDisk
+	if g.ClusterContext.NodeSecondaryDisk != "" {
+		secondaryDisks = []*containerv1beta1.SecondaryBootDisk{
+			{
+				DiskImage: g.ClusterContext.NodeSecondaryDisk,
+				Mode:      "CONTAINER_IMAGE_CACHE",
+			},
+		}
+	}
+
+	var networkConfig *containerv1beta1.NodeNetworkConfig
+	additionalNodeNetworks, err := parseAdditionalNodeNetworks(g.ClusterContext.NodeAdditionalNetworks)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(additionalNodeNetworks) > 0 {
+		networkConfig = &containerv1beta1.NodeNetworkConfig{
+			AdditionalNodeNetworkConfigs: additionalNodeNetworks,
+		}
+	}
+
+	placementPolicy := &containerv1beta1.PlacementPolicy{}
+	if config.PlacementPolicy != "" {
+		placementPolicy.PolicyName = config.PlacementPolicy
+	} else if config.Accelerator == V7xSliceAccelerator {
+		placementPolicy.PolicyName = fmt.Sprintf("tpu-provisioner-%v", config.Topology)
+	} else {
+		placementPolicy.TpuTopology = config.Topology
+		placementPolicy.Type = "COMPACT"
+	}
+
+	var diskType string
+	if g.ClusterContext.NodeDiskType != "" {
+		diskType = g.ClusterContext.NodeDiskType
+	}
+
+	// Nodepool name must be <= 40 characters.
+	// 'static-' prefix in nodepool name is used to exclude static nodepools from the garbage collection loop
+	// used for nodepools that are dynamically provisioned based on workload requirements
+	name := fmt.Sprintf(StaticNodepoolPrefix+"%s", nodePoolID)
+	if len(name) > 40 {
+		name = name[:40]
+	}
+
+	shieldedIntegrityMonitoring := true
+	if config.ShieldedIntegrityMonitoring != nil {
+		shieldedIntegrityMonitoring = *config.ShieldedIntegrityMonitoring
+	}
+	shieldedSecureBoot := g.ClusterContext.NodeSecureBoot
+	if config.ShieldedSecureBoot != nil {
+		shieldedSecureBoot = *config.ShieldedSecureBoot
+	}
+
+	autorepair := true
+	if config.EnableAutoRepair != nil {
+		autorepair = *config.EnableAutoRepair
+	}
+
+	maxPods := maxPodsPerNode
+	if config.MaxPodsPerNode != 0 {
+		maxPods = int(config.MaxPodsPerNode)
+	}
+
+	locations := []string{g.ClusterContext.NodeZone}
+
+	tags := g.ClusterContext.NodeTags
+
+	np := &containerv1beta1.NodePool{
+		Name: name,
+		Config: &containerv1beta1.NodeConfig{
+			ServiceAccount: g.ClusterContext.NodeServiceAccount,
+			ShieldedInstanceConfig: &containerv1beta1.ShieldedInstanceConfig{
+				EnableIntegrityMonitoring: shieldedIntegrityMonitoring,
+				EnableSecureBoot:          shieldedSecureBoot,
+			},
+			Tags:                      tags,
+			SecondaryBootDisks:        secondaryDisks,
+			MachineType:               config.MachineType,
+			ReservationAffinity:       reservation,
+			Labels:                    labels,
+			BootDiskKmsKey:            g.ClusterContext.NodeBootDiskKMSKey,
+			DiskType:                  diskType,
+			EnableConfidentialStorage: g.ClusterContext.NodeConfidentialStorage,
+		},
+		InitialNodeCount: int64(config.NodeCount),
+		Locations:        locations,
+		PlacementPolicy:  placementPolicy,
+		Management: &containerv1beta1.NodeManagement{
+			AutoRepair:  autorepair,
+			AutoUpgrade: false,
+		},
+		UpgradeSettings: &containerv1beta1.UpgradeSettings{
+			MaxSurge: 1,
+		},
+		MaxPodsConstraint: &containerv1beta1.MaxPodsConstraint{MaxPodsPerNode: int64(maxPods)},
+		NetworkConfig:     networkConfig,
+	}
+
+	hash, err := nodePoolSelectiveHash(np)
+	if err != nil {
+		return nil, fmt.Errorf("hashing node pool: %w", err)
+	}
+	np.Config.Labels[LabelNodePoolHash] = hash
+	return np, nil
 }
 
 // nodePoolSelectiveHash attempts to hash information specific to workload requirements.
