@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
@@ -32,6 +31,7 @@ const (
 	SliceOwnerKindLabel      = "tpu-provisioner.cloud.google.com/owner-kind"
 	SliceOwnerNameLabel      = "tpu-provisioner.cloud.google.com/owner-name"
 	SliceOwnerNamespaceLabel = "tpu-provisioner.cloud.google.com/owner-namespace"
+	jobsetOwnerKind          = "jobset"
 )
 
 /*
@@ -70,7 +70,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var existingSliceList v1beta1.SliceList
 	if err := r.List(ctx, &existingSliceList,
 		client.MatchingLabels{
-			SliceOwnerKindLabel:      "jobset",
+			SliceOwnerKindLabel:      jobsetOwnerKind,
 			SliceOwnerNameLabel:      js.Name,
 			SliceOwnerNamespaceLabel: js.Namespace,
 		}); err != nil {
@@ -150,15 +150,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	// Requeue in order to recreate.
-	// NOTE: This should happen via an automatic re-reconcile after the DELETE, but
-	// in integration tests it appears not to happen.
-	var res ctrl.Result
-	if len(toDelete) > 0 {
-		res.RequeueAfter = time.Second
-	}
-
-	return res, nil
+	return ctrl.Result{}, nil
 }
 
 func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -196,7 +188,7 @@ func (r *SliceReconciler) sliceToJobSetRequests(ctx context.Context, obj client.
 	jobsetName, hasName := slice.Labels[SliceOwnerNameLabel]
 	jobsetNamespace, hasNamespace := slice.Labels[SliceOwnerNamespaceLabel]
 
-	if ownerKind != "jobset" || !hasName || !hasNamespace {
+	if ownerKind != jobsetOwnerKind || !hasName || !hasNamespace {
 		return nil
 	}
 
@@ -245,25 +237,18 @@ func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, error) {
 					Name: utils.SliceName(js.Name, string(js.UID), rj.Name, i),
 					Labels: map[string]string{
 						// Track ownership with labels (can't use owner references since Slice is Cluster scoped)
-						SliceOwnerKindLabel:      "jobset",
+						SliceOwnerKindLabel:      jobsetOwnerKind,
 						SliceOwnerNameLabel:      js.Name,
 						SliceOwnerNamespaceLabel: js.Namespace,
 					},
 				},
 				Spec: v1beta1.SliceSpec{
-					// TODO: Check that this is the correct accelerator value to use.
-					Type: v1beta1.Type(accel),
-					// TODO: check that this is the correct topology value to use.
+					Type:     v1beta1.Type(accel),
 					Topology: topo,
 				},
 			}
 			if len(cubeSelection) >= i+1 {
 				s.Spec.PartitionIds = cubeSelection[i]
-			} else {
-				// PartitionIds is a required field, should that be changed?
-				// TODO: Revisit this - I commented out the requirement in the test CRD for now
-				// since there is also a min(1) requirement.
-				//s.Spec.PartitionIds = []string{}
 			}
 			slices = append(slices, s)
 		}
@@ -306,8 +291,8 @@ func partitionsEqual(a, b []string) bool {
 
 // diffSlices compares desired slices with existing slices and returns
 // lists of slices to delete and create.
-// Slices are considered different if their NodeSelectors differ.
-// When a slice needs to be deleted due to NodeSelector change, it is NOT included
+// Slices are considered different if their PartitionIds differ.
+// When a slice needs to be deleted due to PartitionIds change, it is NOT included
 // in toCreate - the creation will happen in a subsequent reconciliation pass.
 func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice) (toDelete, toCreate []v1beta1.Slice) {
 	// Create a map of existing slices by name for quick lookup
@@ -319,7 +304,7 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice) (toDelete, to
 	// Check each desired slice
 	for _, desiredSlice := range desired {
 		if existingSlice, exists := existingMap[desiredSlice.Name]; exists {
-			// Slice exists - check if NodeSelector has changed
+			// Slice exists - check if partitions have changed
 			if !partitionsEqual(existingSlice.Spec.PartitionIds, desiredSlice.Spec.PartitionIds) {
 				// NodeSelector changed - delete existing (creation will happen in next reconcile)
 				toDelete = append(toDelete, *existingSlice)
@@ -339,10 +324,10 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice) (toDelete, to
 func (r *SliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet, desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice) error {
 	log := ctrllog.FromContext(ctx)
 
-	allReady := allSlicesReady(desiredSlices, existingSlices)
-	currentlySuspended := js.Spec.Suspend != nil && *js.Spec.Suspend
+	slicesReady := allSlicesReady(desiredSlices, existingSlices)
+	jsCurrentlySuspended := js.Spec.Suspend != nil && *js.Spec.Suspend
 
-	if allReady && currentlySuspended {
+	if slicesReady && jsCurrentlySuspended {
 		// All slices are ready, unsuspend the JobSet
 		log.Info("All Slices are Ready, unsuspending JobSet")
 		suspendValue := false
@@ -351,7 +336,7 @@ func (r *SliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet,
 			return fmt.Errorf("unsuspending jobset: %w", err)
 		}
 		r.Recorder.Event(js, "Normal", "Unsuspended", "All Slices are Ready")
-	} else if !allReady && !currentlySuspended {
+	} else if !slicesReady && !jsCurrentlySuspended {
 		// Not all slices are ready, suspend the JobSet
 		log.Info("Not all Slices are Ready, suspending JobSet",
 			"readyCount", countReadySlices(existingSlices),

@@ -40,7 +40,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x4",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -56,7 +56,7 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4"),
+				makeSlice("js-test-jobset-test-uid-worker-0", "4x4x4"),
 			},
 			wantErr: false,
 		},
@@ -78,7 +78,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x4",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -94,9 +94,9 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4"),
-				makeSlice("js-test-jobset-test-uid-worker-1", "2x2x4"),
-				makeSlice("js-test-jobset-test-uid-worker-2", "2x2x4"),
+				makeSlice("js-test-jobset-test-uid-worker-0", "4x4x4"),
+				makeSlice("js-test-jobset-test-uid-worker-1", "4x4x4"),
+				makeSlice("js-test-jobset-test-uid-worker-2", "4x4x4"),
 			},
 			wantErr: false,
 		},
@@ -118,7 +118,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x4",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -138,7 +138,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x2",
+												topologyAnnotation: "4x4x8",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -154,9 +154,9 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-1-0", "2x2x4"),
-				makeSlice("js-test-jobset-test-uid-worker-1-1", "2x2x4"),
-				makeSlice("js-test-jobset-test-uid-worker-2-0", "2x2x2"),
+				makeSlice("js-test-jobset-test-uid-worker-1-0", "4x4x4"),
+				makeSlice("js-test-jobset-test-uid-worker-1-1", "4x4x4"),
+				makeSlice("js-test-jobset-test-uid-worker-2-0", "4x4x8"),
 			},
 			wantErr: false,
 		},
@@ -193,7 +193,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x4",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -227,7 +227,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x4",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -331,7 +331,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x8",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -347,8 +347,8 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4", "cube-1", "cube-2"),
-				makeSlice("js-test-jobset-test-uid-worker-1", "2x2x4", "cube-3", "cube-4"),
+				makeSlice("js-test-jobset-test-uid-worker-0", "4x4x8", "cube-1", "cube-2"),
+				makeSlice("js-test-jobset-test-uid-worker-1", "4x4x8", "cube-3", "cube-4"),
 			},
 			wantErr: false,
 		},
@@ -373,7 +373,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x4",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -413,7 +413,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x8",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -429,8 +429,8 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-0", "2x2x4", "cube-1", "cube-2"),
-				makeSlice("js-test-jobset-test-uid-worker-1", "2x2x4"),
+				makeSlice("js-test-jobset-test-uid-worker-0", "4x4x8", "cube-1", "cube-2"),
+				makeSlice("js-test-jobset-test-uid-worker-1", "4x4x4"),
 			},
 			wantErr: false,
 		},
@@ -452,7 +452,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x4",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -468,7 +468,7 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSliceWithJobSet("js-this-is-a-very-long-jobset-name--test-uid-long-repli-0", tpu7xAccelerator, "2x2x4", "this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", "default"),
+				makeSliceWithJobSet("js-this-is-a-very-long-jobset-name--test-uid-long-repli-0", tpu7xAccelerator, "4x4x4", "this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", "default"),
 			},
 			wantErr: false,
 		},
@@ -490,7 +490,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x4",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -510,7 +510,7 @@ func TestJobsetSlices(t *testing.T) {
 									Template: corev1.PodTemplateSpec{
 										ObjectMeta: metav1.ObjectMeta{
 											Annotations: map[string]string{
-												topologyAnnotation: "2x2x4",
+												topologyAnnotation: "4x4x8",
 											},
 										},
 										Spec: corev1.PodSpec{
@@ -526,7 +526,7 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-v7x-worker-0", "2x2x4"),
+				makeSlice("js-test-jobset-test-uid-v7x-worker-0", "4x4x4"),
 			},
 			wantErr: false,
 		},
@@ -681,41 +681,41 @@ func TestDiffSlices(t *testing.T) {
 		{
 			name: "create new slices when none exist",
 			desired: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
 			},
 			existing:     []v1beta1.Slice{},
 			wantToDelete: nil,
 			wantToCreate: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
 			},
 		},
 		{
 			name: "delete slices with changed NodeSelector without creating replacements",
 			desired: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-5", "cube-6"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-7", "cube-8"),
+				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-5", "cube-6"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-7", "cube-8"),
 			},
 			existing: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
 			},
 			wantToDelete: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
 			},
 			wantToCreate: nil,
 		},
 		{
 			name: "no changes when NodeSelectors match",
 			desired: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
 			},
 			existing: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "2x2x4", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "2x2x4", "cube-3", "cube-4"),
+				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
+				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
 			},
 			wantToDelete: nil,
 			wantToCreate: nil,
