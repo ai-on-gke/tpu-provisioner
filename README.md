@@ -183,6 +183,74 @@ Test that you can apply a TPU Job.
 kubectl apply -f ./examples/v4-2x2x4/
 ```
 
+### Static Nodepool Provisioner
+
+In addition to dynamic nodepool creation, the TPU provisioner also supports pre-provisioning nodepools based on a static configuration. This functionality is designed to be used with gSC reservations and superslicing.
+
+The static nodepool provisioner is configured via a `ConfigMap` named `static-nodepools-config` in the same namespace as the provisioner. The provisioner will watch for changes to this `ConfigMap` and create or update nodepools accordingly.
+
+Here is an example of the `static-nodepools-config` `ConfigMap`:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: static-nodepools-config
+data:
+  reservations: |
+    - name: "test-reservation"
+      gscBlocks:
+        - name: "test-reservation-block-0001"
+          numSubblocks: 1
+  nodepoolConfig: |
+    machineType: "tpu7x-standard-4t"
+    accelerator: "tpu7x"
+    topology: "4x4x4"
+    nodeCount: 16
+    nodeLabels:
+      label-key: "label-value"
+    shieldedIntegrityMonitoring: true
+    maxPodsPerNode: 8
+    enableAutorepair: true
+    placementPolicy: "tpu-provisioner-4x4x4"
+    nodepoolNameSuffix: "my-static-nodepools"
+```
+
+#### Configuration Parameters
+
+The `ConfigMap` has two main keys: `reservations` and `nodepoolConfig`.
+
+##### `reservations`
+
+This key contains a list of TPU reservations. Each reservation has a `name` and a list of `gscBlocks`. Each `gscBlock` has a `name` and the `numSubblocks` to provision within that block.
+
+##### `nodepoolConfig`
+
+This key contains the configuration for the nodepools that will be created. The following parameters are supported:
+
+*   `machineType`: The GCE machine type for the nodes.
+*   `accelerator`: The type of TPU accelerator.
+*   `topology`: The TPU topology.
+*   `nodeCount`: The number of nodes in the nodepool.
+*   `nodeLabels`: A map of key-value pairs to set as labels on the nodes.
+*   `shieldedIntegrityMonitoring`: (Optional) `true` or `false` to enable/disable shielded integrity monitoring. Defaults to `nil` (GKE default).
+*   `maxPodsPerNode`: (Optional) The maximum number of pods that can run on a node.
+*   `enableAutorepair`: (Optional) `true` or `false` to enable/disable node auto-repair. Defaults to `nil` (GKE default).
+*   `placementPolicy`: (Optional) The placement policy for the nodes (e.g., `COMPACT` or `tpu-provisioner-4x4x4`).
+*   `nodepoolNameSuffix`: (Optional) A custom suffix for the nodepool name. If not provided, the block name is used as the suffix.
+
+Some configuration parameters come from environment variables rather than the configmap, particularly those that are shared across both statically and dynamically created nodepools managed by the provisioner. This includes the following environment variables typically set in the manager configmap (note that the `STATIC_NODEPOOL_CREATE_CONCURRENCY` environment variable is distinct from the `CONCURRENCY` environment variable to allow for separate nodepool create operation limits between static and dynamic nodepools):
+
+```bash
+STATIC_NODEPOOL_CREATE_CONCURRENCY: "3"
+GCP_PROJECT_ID: my-project
+GCP_CLUSTER_LOCATION: us-central1
+GCP_ZONE: us-central1-c
+GCP_CLUSTER: test-cluster
+GCP_NODE_ADDITIONAL_NETWORKS: test-network:test-subnet
+GCP_NODE_TAGS: test-tag
+GCP_NODE_SERVICE_ACCOUNT: my-service-account-email
+```
 
 ### Ironwood / tpu7x support
 
