@@ -822,6 +822,9 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 		shieldedIntegrityMonitoring = *config.ShieldedIntegrityMonitoring
 	}
 	shieldedSecureBoot := g.ClusterContext.NodeSecureBoot
+	if config.ShieldedSecureBoot != nil {
+		shieldedSecureBoot = *config.ShieldedSecureBoot
+	}
 
 	autorepair := true
 	if config.EnableAutoRepair != nil {

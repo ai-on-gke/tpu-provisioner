@@ -183,6 +183,10 @@ Test that you can apply a TPU Job.
 kubectl apply -f ./examples/v4-2x2x4/
 ```
 
+### Ironwood / tpu7x support
+
+In order to support ironwood we need to have Workload Policy's attached to nodepool creation step, in order to work with the tpu-provisioner you will need Workload Policy resources in the project and region with the following syntax: `tpu-provisioner-$TPU_TOPOLOGY`, e.g. `tpu-provisioner-2x2x2` or `tpu-provisioner-8x8x16`. See the script in [./docs/ironwood-policy-bootstrap.sh](./docs/ironwood-policy-bootstrap.sh), which would need to run ahead of time in the project for each region where ironwood capacity is landing.
+
 ### Static Nodepool Provisioner
 
 In addition to dynamic nodepool creation, the TPU provisioner also supports pre-provisioning nodepools based on a static configuration. This functionality is designed to be used with gSC reservations and superslicing.
@@ -234,6 +238,7 @@ This key contains the configuration for the nodepools that will be created. The 
 *   `nodeCount`: The number of nodes in the nodepool.
 *   `nodeLabels`: A map of key-value pairs to set as labels on the nodes.
 *   `shieldedIntegrityMonitoring`: (Optional) `true` or `false` to enable/disable shielded integrity monitoring. Defaults to `nil` (GKE default).
+*   `shieldedSecureBoot`: (Optional) `true` or `false` to enable/disable shielded secure boot. Defaults to `nil` (GKE default).
 *   `maxPodsPerNode`: (Optional) The maximum number of pods that can run on a node.
 *   `enableAutorepair`: (Optional) `true` or `false` to enable/disable node auto-repair. Defaults to `nil` (GKE default).
 *   `placementPolicy`: (Optional) The placement policy for the nodes (e.g., `COMPACT` or `tpu-provisioner-4x4x4`).
@@ -251,7 +256,3 @@ GCP_NODE_ADDITIONAL_NETWORKS: test-network:test-subnet
 GCP_NODE_TAGS: test-tag
 GCP_NODE_SERVICE_ACCOUNT: my-service-account-email
 ```
-
-### Ironwood / tpu7x support
-
-In order to support ironwood we need to have Workload Policy's attached to nodepool creation step, in order to work with the tpu-provisioner you will need Workload Policy resources in the project and region with the following syntax: `tpu-provisioner-$TPU_TOPOLOGY`, e.g. `tpu-provisioner-2x2x2` or `tpu-provisioner-8x8x16`. See the script in [./docs/ironwood-policy-bootstrap.sh](./docs/ironwood-policy-bootstrap.sh), which would need to run ahead of time in the project for each region where ironwood capacity is landing.

@@ -53,6 +53,7 @@ type StaticNodePoolConfig struct {
 	NodeCount                   int               `yaml:"nodeCount"`
 	NodeLabels                  map[string]string `yaml:"nodeLabels"`
 	ShieldedIntegrityMonitoring *bool             `yaml:"shieldedIntegrityMonitoring"`
+	ShieldedSecureBoot          *bool             `yaml:"shieldedSecureBoot"`
 	MaxPodsPerNode              int64             `yaml:"maxPodsPerNode"`
 	EnableAutoRepair            *bool             `yaml:"enableAutorepair"`
 	PlacementPolicy             string            `yaml:"placementPolicy"`
