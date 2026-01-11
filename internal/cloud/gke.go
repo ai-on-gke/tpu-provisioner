@@ -628,12 +628,12 @@ func tpuMachineType(accel string, tpuRequest int) (string, error) {
 	return "", fmt.Errorf("invalid accelerator: %v", accel)
 }
 
-func waitForGkeOp(svc *containerv1beta1.Service, c GKEContext, operation *containerv1beta1.Operation) error {
+func waitForGkeOp(ctx context.Context, svc *containerv1beta1.Service, c GKEContext, operation *containerv1beta1.Operation) error {
 	operationWaitTimeout := 30 * time.Minute
 	operationPollInterval := 5 * time.Second
 
 	for start := time.Now(); time.Since(start) < operationWaitTimeout; time.Sleep(operationPollInterval) {
-		if op, err := svc.Projects.Locations.Operations.Get(c.OpName(operation.Name)).Do(); err == nil {
+		if op, err := svc.Projects.Locations.Operations.Get(c.OpName(operation.Name)).Context(ctx).Do(); err == nil {
 			if op.Status == "DONE" {
 				return nil
 			}

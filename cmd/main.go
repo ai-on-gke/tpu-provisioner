@@ -41,6 +41,7 @@ import (
 
 	containerv1beta1 "google.golang.org/api/container/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -151,8 +152,9 @@ func main() {
 					// are managed by this controller.
 					Label: labels.SelectorFromSet(labels.Set{cloud.LabelNodepoolManager: cloud.LabelNodepoolManagerTPUPodinator}),
 				},
-				// Apply namespace filter only to ConfigMaps.
+				// Filter based on ConfigMap name.
 				&corev1.ConfigMap{}: {
+					Field: fields.SelectorFromSet(fields.Set{"metadata.name": controller.ConfigMapName}),
 					Namespaces: map[string]cache.Config{
 						cfg.PodNamespace: {},
 					},

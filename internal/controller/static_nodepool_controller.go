@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
@@ -31,11 +30,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 const (
-	ConfigMapName = "static-nodepools-config"
+	ConfigMapName = "tpu-provisioner-static-nodepools-config"
 )
 
 type GscBlock struct {
@@ -64,11 +62,6 @@ type StaticNodepoolReconciler struct {
 
 func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	lg := ctrllog.FromContext(ctx)
-
-	// Only reconcile if this configmap is the one we are looking for.
-	if !strings.Contains(req.Name, ConfigMapName) || req.Namespace != r.Namespace {
-		return ctrl.Result{}, nil
-	}
 
 	lg.V(3).Info("Reconciling static nodepools")
 
@@ -130,8 +123,5 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 func (r *StaticNodepoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}).
-		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
-			return strings.Contains(object.GetName(), ConfigMapName) && object.GetNamespace() == r.Namespace
-		})).
 		Complete(r)
 }

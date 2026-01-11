@@ -191,15 +191,15 @@ In order to support ironwood we need to have Workload Policy's attached to nodep
 
 In addition to dynamic nodepool creation, the TPU provisioner also supports pre-provisioning nodepools based on a static configuration. This functionality is designed to be used with gSC reservations and superslicing.
 
-The static nodepool provisioner is configured via a `ConfigMap` named `static-nodepools-config` in the same namespace as the provisioner. The provisioner will watch for changes to this `ConfigMap` and create or update nodepools accordingly.
+The static nodepool provisioner is configured via a `ConfigMap` in the same namespace as the provisioner. Note that the name needs to be set to `tpu-provisioner-static-nodepools-config` because the name is used to filter the objects returned by the Kubernetes API. The provisioner will watch for changes to this `ConfigMap` and create or update nodepools accordingly.
 
-Here is an example of the `static-nodepools-config` `ConfigMap`:
+Here is an example of the `tpu-provisioner-static-nodepools-config` `ConfigMap`:
 
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: static-nodepools-config
+  name: tpu-provisioner-static-nodepools-config
 data:
   reservations: |
     - name: "test-reservation"
