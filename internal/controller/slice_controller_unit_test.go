@@ -430,7 +430,7 @@ func TestJobsetSlices(t *testing.T) {
 			},
 			want: []v1beta1.Slice{
 				makeSlice("js-test-jobset-test-uid-worker-0", "4x4x8", "cube-1", "cube-2"),
-				makeSlice("js-test-jobset-test-uid-worker-1", "4x4x4"),
+				makeSlice("js-test-jobset-test-uid-worker-1", "4x4x8"),
 			},
 			wantErr: false,
 		},
