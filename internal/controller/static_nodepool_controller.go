@@ -39,6 +39,7 @@ const (
 type GscBlock struct {
 	Name         string `yaml:"name"`
 	NumSubblocks int    `yaml:"numSubblocks"`
+	NodepoolName string `yaml:"nodepoolName,omitempty"`
 }
 
 type Reservation struct {
@@ -104,7 +105,7 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			lg.Info(fmt.Sprintf("Ensuring static nodepool for gscBlock: %s", gscBlock.Name))
 			createCtx, cancel := context.WithTimeout(ctx, r.StaticNodepoolCreateTimeout)
 			defer cancel()
-			if err := r.Provider.EnsureStaticNodePools(createCtx, reservation.Name, gscBlock.Name, gscBlock.NumSubblocks, &nodepoolConfig, r.Concurrency); err != nil {
+			if err := r.Provider.EnsureStaticNodePools(createCtx, reservation.Name, gscBlock.Name, gscBlock.NodepoolName, gscBlock.NumSubblocks, &nodepoolConfig, r.Concurrency); err != nil {
 				wrappedErr := fmt.Errorf("failed to ensure static nodepool for %s: %w", gscBlock.Name, err)
 				lg.Error(wrappedErr, "error ensuring static nodepool for gscBlock")
 				allErrors = append(allErrors, wrappedErr)

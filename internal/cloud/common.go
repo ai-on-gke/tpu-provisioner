@@ -57,10 +57,6 @@ type StaticNodePoolConfig struct {
 	MaxPodsPerNode              int64             `yaml:"maxPodsPerNode"`
 	EnableAutoRepair            *bool             `yaml:"enableAutorepair"`
 	PlacementPolicy             string            `yaml:"placementPolicy"`
-
-	// NodepoolNameSuffix is a custom suffix for the nodepool name.
-	// If not provided, the reservation name is used as the suffix.
-	NodepoolNameSuffix string `yaml:"nodepoolNameSuffix"`
 }
 
 type Provider interface {
@@ -69,7 +65,7 @@ type Provider interface {
 	DeleteNodePoolForNode(*corev1.Node, string) error
 	DeleteNodePool(string, client.Object, string) error
 	ListNodePools() ([]NodePoolRef, error)
-	EnsureStaticNodePools(ctx context.Context, reservationName, blockName string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error
+	EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolName string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error
 }
 
 var ErrDuplicateRequest = errors.New("duplicate request")

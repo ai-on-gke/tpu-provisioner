@@ -31,7 +31,7 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 
 	// Should create two node pools: static-test-block-1-0 and static-test-block-1-1
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "test-block-1", 2, config, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", "test-block-1", "", 2, config, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 
@@ -74,7 +74,7 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 
 	// Second call with same parameters, should not create any new node pools.
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "test-block-1", 2, config, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", "test-block-1", "", 2, config, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-test-block-1-0"]; got != 1 {
@@ -86,7 +86,7 @@ func TestEnsureStaticNodePool(t *testing.T) {
 
 	// Modify a node pool and call again, should not create a new one as hash is still the same.
 	np1.Config.MachineType = "different"
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "test-block-1", 2, config, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", "test-block-1", "", 2, config, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-test-block-1-0"]; got != 1 {
@@ -98,14 +98,13 @@ func TestEnsureStaticNodePool(t *testing.T) {
 
 	// Test custom nodepool suffix.
 	customConfig := &StaticNodePoolConfig{
-		MachineType:        "tpu7x-standard-4t",
-		Accelerator:        V7xSliceAccelerator,
-		Topology:           "4x4x4",
-		NodeCount:          16,
-		NodepoolNameSuffix: "custom-name",
+		MachineType: "tpu7x-standard-4t",
+		Accelerator: V7xSliceAccelerator,
+		Topology:    "4x4x4",
+		NodeCount:   16,
 	}
 	// This call should create static-custom-name-0 and static-custom-name-1
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "custom-name", 2, customConfig, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", "custom-name", "custom-name", 2, customConfig, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["static-custom-name-0"]; got != 1 {
@@ -132,6 +131,44 @@ func TestEnsureStaticNodePool(t *testing.T) {
 		t.Fatal("nodepool static-custom-name-1 not found")
 	}
 	if got, want := npCustom2.Config.Labels[LabelProvisionerNodepoolID], "custom-name-1"; got != want {
+		t.Errorf("got label %q, want %q", got, want)
+	}
+
+	// Test custom nodepool suffix with different block name.
+	customConfig2 := &StaticNodePoolConfig{
+		MachineType: "tpu7x-standard-4t",
+		Accelerator: V7xSliceAccelerator,
+		Topology:    "4x4x4",
+		NodeCount:   16,
+	}
+	// This call should create static-custom-suffix-0 and static-custom-suffix-1
+	if err := gke.EnsureStaticNodePools(ctx, "res-2", "block-name-ignored", "custom-suffix", 2, customConfig2, 1); err != nil {
+		t.Fatalf("EnsureStaticNodePools(): %v", err)
+	}
+	if got := svc.creates["static-custom-suffix-0"]; got != 1 {
+		t.Errorf("expected 1 create for static-custom-suffix-0, got %d", got)
+	}
+	if got := svc.creates["static-custom-suffix-1"]; got != 1 {
+		t.Errorf("expected 1 create for static-custom-suffix-1, got %d", got)
+	}
+
+	if got := len(svc.nodePools); got != 6 { // 2 from first call, 2 from custom config, 2 from this call
+		t.Fatalf("expected 6 node pools, got %d", got)
+	}
+
+	npCustom3 := svc.nodePools["static-custom-suffix-0"]
+	if npCustom3 == nil {
+		t.Fatal("nodepool static-custom-suffix-0 not found")
+	}
+	if got, want := npCustom3.Config.Labels[LabelProvisionerNodepoolID], "custom-suffix-0"; got != want {
+		t.Errorf("got label %q, want %q", got, want)
+	}
+
+	npCustom4 := svc.nodePools["static-custom-suffix-1"]
+	if npCustom4 == nil {
+		t.Fatal("nodepool static-custom-suffix-1 not found")
+	}
+	if got, want := npCustom4.Config.Labels[LabelProvisionerNodepoolID], "custom-suffix-1"; got != want {
 		t.Errorf("got label %q, want %q", got, want)
 	}
 }
