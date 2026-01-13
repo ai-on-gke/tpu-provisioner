@@ -37,8 +37,9 @@ const (
 )
 
 type GscBlock struct {
-	Name         string `yaml:"name"`
-	NumSubblocks int    `yaml:"numSubblocks"`
+	Name           string `yaml:"name"`
+	NumSubblocks   int    `yaml:"numSubblocks"`
+	NodepoolSuffix string `yaml:"nodepoolSuffix"`
 }
 
 type Reservation struct {
@@ -101,10 +102,16 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var allErrors []error
 	for _, reservation := range reservations {
 		for _, gscBlock := range reservation.GscBlocks {
+			if gscBlock.NodepoolSuffix == "" {
+				wrappedErr := fmt.Errorf("nodepoolSuffix cannot be empty for gscBlock: %s", gscBlock.Name)
+				lg.Error(wrappedErr, "error ensuring static nodepool for gscBlock")
+				allErrors = append(allErrors, wrappedErr)
+				continue
+			}
 			lg.Info(fmt.Sprintf("Ensuring static nodepool for gscBlock: %s", gscBlock.Name))
 			createCtx, cancel := context.WithTimeout(ctx, r.StaticNodepoolCreateTimeout)
 			defer cancel()
-			if err := r.Provider.EnsureStaticNodePools(createCtx, reservation.Name, gscBlock.Name, gscBlock.NumSubblocks, &nodepoolConfig, r.Concurrency); err != nil {
+			if err := r.Provider.EnsureStaticNodePools(createCtx, reservation.Name, gscBlock.Name, gscBlock.NodepoolSuffix, gscBlock.NumSubblocks, &nodepoolConfig, r.Concurrency); err != nil {
 				wrappedErr := fmt.Errorf("failed to ensure static nodepool for %s: %w", gscBlock.Name, err)
 				lg.Error(wrappedErr, "error ensuring static nodepool for gscBlock")
 				allErrors = append(allErrors, wrappedErr)

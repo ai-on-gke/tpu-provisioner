@@ -682,7 +682,7 @@ func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*container
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error {
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolSuffix string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error {
 	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName, "blockName", blockName)
 
 	var wg sync.WaitGroup
@@ -697,7 +697,7 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockN
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			nodePoolID := fmt.Sprintf("%s-%d", blockName, i)
+			nodePoolID := fmt.Sprintf("%s-%d", nodepoolSuffix, i)
 			reservationToConsume := fmt.Sprintf("%s/reservationBlocks/%s", reservationName, blockName)
 			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationToConsume, config)
 			if err != nil {
@@ -814,7 +814,7 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 	// used for nodepools that are dynamically provisioned based on workload requirements
 	name := fmt.Sprintf(StaticNodepoolPrefix+"%s", nodePoolID)
 	if len(name) > 40 {
-		name = name[:40]
+		return nil, fmt.Errorf("generated nodepool name %q is longer than 40 characters. Please specify a custom suffix for the nodepool name in the tpu-provisioner-static-nodepools-config configmap that meets the length requirements", name)
 	}
 
 	shieldedIntegrityMonitoring := true

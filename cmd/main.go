@@ -65,6 +65,7 @@ var (
 	scheme                = runtime.NewScheme()
 	setupLog              = ctrl.Log.WithName("setup")
 	enableSliceController = os.Getenv("ENABLE_SLICE_CONTROLLER") == "true"
+	enableWebhooks        = os.Getenv("ENABLE_WEBHOOKS") == "true"
 )
 
 func init() {
@@ -139,16 +140,21 @@ func main() {
 		cfg.PodNamespace = "default"
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Metrics: server.Options{
-			BindAddress: metricsAddr,
-		},
-		WebhookServer: webhook.NewServer(
+	var webhookServer webhook.Server
+	if enableWebhooks {
+		webhookServer = webhook.NewServer(
 			webhook.Options{
 				Port:    9443,
 				CertDir: "/certs",
 			},
-		),
+		)
+	}
+
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Metrics: server.Options{
+			BindAddress: metricsAddr,
+		},
+		WebhookServer:          webhookServer,
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
@@ -317,11 +323,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Register webhook handlers
-	jobWebhook := &jobwebhook.JobMutationHandler{
-		Decoder: admission.NewDecoder(scheme),
+	if enableWebhooks {
+		// Register webhook handlers
+		jobWebhook := &jobwebhook.JobMutationHandler{
+			Decoder: admission.NewDecoder(scheme),
+		}
+		mgr.GetWebhookServer().Register("/mutate", &webhook.Admission{Handler: jobWebhook})
 	}
-	mgr.GetWebhookServer().Register("/mutate", &webhook.Admission{Handler: jobWebhook})
 
 	//+kubebuilder:scaffold:builder
 

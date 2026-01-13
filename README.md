@@ -206,6 +206,7 @@ data:
       gscBlocks:
         - name: "test-reservation-block-0001"
           numSubblocks: 1
+          nodepoolSuffix: "my-static-nodepool"
   nodepoolConfig: |
     machineType: "tpu7x-standard-4t"
     accelerator: "tpu7x"
@@ -217,7 +218,6 @@ data:
     maxPodsPerNode: 8
     enableAutorepair: true
     placementPolicy: "tpu-provisioner-4x4x4"
-    nodepoolNameSuffix: "my-static-nodepools"
 ```
 
 #### Configuration Parameters
@@ -226,7 +226,7 @@ The `ConfigMap` has two main keys: `reservations` and `nodepoolConfig`.
 
 ##### `reservations`
 
-This key contains a list of TPU reservations. Each reservation has a `name` and a list of `gscBlocks`. Each `gscBlock` has a `name` and the `numSubblocks` to provision within that block.
+This key contains a list of TPU reservations. Each reservation has a `name` and a list of `gscBlocks`. Each `gscBlock` has a `name`, the `numSubblocks` to provision within that block, and the `nodepoolSuffix` which will be used as the suffix for the nodepool name (prepended with `static-`).
 
 ##### `nodepoolConfig`
 
@@ -242,7 +242,6 @@ This key contains the configuration for the nodepools that will be created. The 
 *   `maxPodsPerNode`: (Optional) The maximum number of pods that can run on a node.
 *   `enableAutorepair`: (Optional) `true` or `false` to enable/disable node auto-repair. Defaults to `nil` (GKE default).
 *   `placementPolicy`: (Optional) The placement policy for the nodes (e.g., `COMPACT` or `tpu-provisioner-4x4x4`).
-*   `nodepoolNameSuffix`: (Optional) A custom suffix for the nodepool name. If not provided, the block name is used as the suffix.
 
 Some configuration parameters come from environment variables rather than the configmap, particularly those that are shared across both statically and dynamically created nodepools managed by the provisioner. This includes the following environment variables typically set in the manager configmap (note that the `STATIC_NODEPOOL_CREATE_CONCURRENCY` environment variable is distinct from the `CONCURRENCY` environment variable to allow for separate nodepool create operation limits between static and dynamic nodepools):
 

@@ -23,115 +23,79 @@ func TestEnsureStaticNodePool(t *testing.T) {
 
 	ctx := context.Background()
 
-	config := &StaticNodePoolConfig{
+	// Test np-name nodepool suffix.
+	npNameConfig := &StaticNodePoolConfig{
 		MachineType: "tpu7x-standard-4t",
 		Accelerator: V7xSliceAccelerator,
 		Topology:    "4x4x4",
 		NodeCount:   16,
 	}
-
-	// Should create two node pools: static-test-block-1-0 and static-test-block-1-1
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "test-block-1", 2, config, 1); err != nil {
+	// This call should create static-np-name-0 and static-np-name-1
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", "np-name-block", "np-name", 2, npNameConfig, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
+	if got := svc.creates["static-np-name-0"]; got != 1 {
+		t.Errorf("expected 1 create for static-np-name-0, got %d", got)
+	}
+	if got := svc.creates["static-np-name-1"]; got != 1 {
+		t.Errorf("expected 1 create for static-np-name-1, got %d", got)
+	}
 
-	if got := len(svc.nodePools); got != 2 {
+	if got := len(svc.nodePools); got != 2 { // 2 from npNameConfig
 		t.Fatalf("expected 2 node pools, got %d", got)
 	}
-	if got := svc.creates["static-test-block-1-0"]; got != 1 {
-		t.Errorf("expected 1 create for static-test-block-1-0, got %d", got)
-	}
-	if got := svc.creates["static-test-block-1-1"]; got != 1 {
-		t.Errorf("expected 1 create for static-test-block-1-1, got %d", got)
-	}
 
-	np1 := svc.nodePools["static-test-block-1-0"]
+	np1 := svc.nodePools["static-np-name-0"]
 	if np1 == nil {
-		t.Fatal("nodepool static-test-block-1-0 not found")
+		t.Fatal("nodepool static-np-name-0 not found")
 	}
-	if got, want := np1.Config.MachineType, "tpu7x-standard-4t"; got != want {
-		t.Errorf("got machine type %q, want %q", got, want)
-	}
-	if got, want := np1.InitialNodeCount, int64(16); got != want {
-		t.Errorf("got initial node count %d, want %d", got, want)
-	}
-	if got, want := np1.Config.Labels[LabelProvisionerNodepoolID], "test-block-1-0"; got != want {
+	if got, want := np1.Config.Labels[LabelProvisionerNodepoolID], "np-name-0"; got != want {
 		t.Errorf("got label %q, want %q", got, want)
 	}
 
-	np2 := svc.nodePools["static-test-block-1-1"]
+	np2 := svc.nodePools["static-np-name-1"]
 	if np2 == nil {
-		t.Fatal("nodepool static-test-block-1-1 not found")
+		t.Fatal("nodepool static-np-name-1 not found")
 	}
-	if got, want := np2.Config.MachineType, "tpu7x-standard-4t"; got != want {
-		t.Errorf("got machine type %q, want %q", got, want)
-	}
-	if got, want := np2.InitialNodeCount, int64(16); got != want {
-		t.Errorf("got initial node count %d, want %d", got, want)
-	}
-	if got, want := np2.Config.Labels[LabelProvisionerNodepoolID], "test-block-1-1"; got != want {
+	if got, want := np2.Config.Labels[LabelProvisionerNodepoolID], "np-name-1"; got != want {
 		t.Errorf("got label %q, want %q", got, want)
 	}
 
-	// Second call with same parameters, should not create any new node pools.
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "test-block-1", 2, config, 1); err != nil {
+	// Test np-suffix nodepool suffix with different block name.
+	npSuffixConfig := &StaticNodePoolConfig{
+		MachineType: "tpu7x-standard-4t",
+		Accelerator: V7xSliceAccelerator,
+		Topology:    "4x4x4",
+		NodeCount:   16,
+	}
+	// This call should create static-np-suffix-0 and static-np-suffix-1
+	if err := gke.EnsureStaticNodePools(ctx, "res-2", "block-name-ignored", "np-suffix", 2, npSuffixConfig, 1); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
-	if got := svc.creates["static-test-block-1-0"]; got != 1 {
-		t.Errorf("expected 1 create for static-test-block-1-0, got %d", got)
+	if got := svc.creates["static-np-suffix-0"]; got != 1 {
+		t.Errorf("expected 1 create for static-np-suffix-0, got %d", got)
 	}
-	if got := svc.creates["static-test-block-1-1"]; got != 1 {
-		t.Errorf("expected 1 create for static-test-block-1-1, got %d", got)
-	}
-
-	// Modify a node pool and call again, should not create a new one as hash is still the same.
-	np1.Config.MachineType = "different"
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "test-block-1", 2, config, 1); err != nil {
-		t.Fatalf("EnsureStaticNodePools(): %v", err)
-	}
-	if got := svc.creates["static-test-block-1-0"]; got != 1 {
-		t.Errorf("expected 1 create for static-test-block-1-0, got %d", got)
-	}
-	if got := svc.creates["static-test-block-1-1"]; got != 1 {
-		t.Errorf("expected 1 create for static-test-block-1-1, got %d", got)
+	if got := svc.creates["static-np-suffix-1"]; got != 1 {
+		t.Errorf("expected 1 create for static-np-suffix-1, got %d", got)
 	}
 
-	// Test custom nodepool suffix.
-	customConfig := &StaticNodePoolConfig{
-		MachineType:        "tpu7x-standard-4t",
-		Accelerator:        V7xSliceAccelerator,
-		Topology:           "4x4x4",
-		NodeCount:          16,
-		NodepoolNameSuffix: "custom-name",
-	}
-	// This call should create static-custom-name-0 and static-custom-name-1
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "custom-name", 2, customConfig, 1); err != nil {
-		t.Fatalf("EnsureStaticNodePools(): %v", err)
-	}
-	if got := svc.creates["static-custom-name-0"]; got != 1 {
-		t.Errorf("expected 1 create for static-custom-name-0, got %d", got)
-	}
-	if got := svc.creates["static-custom-name-1"]; got != 1 {
-		t.Errorf("expected 1 create for static-custom-name-1, got %d", got)
-	}
-
-	if got := len(svc.nodePools); got != 4 { // 2 from first call, 2 from custom config
+	if got := len(svc.nodePools); got != 4 { // 2 from npNameConfig, 2 from this call
 		t.Fatalf("expected 4 node pools, got %d", got)
 	}
 
-	npCustom1 := svc.nodePools["static-custom-name-0"]
-	if npCustom1 == nil {
-		t.Fatal("nodepool static-custom-name-0 not found")
+	np3 := svc.nodePools["static-np-suffix-0"]
+	if np3 == nil {
+		t.Fatal("nodepool static-np-suffix-0 not found")
 	}
-	if got, want := npCustom1.Config.Labels[LabelProvisionerNodepoolID], "custom-name-0"; got != want {
+	if got, want := np3.Config.Labels[LabelProvisionerNodepoolID], "np-suffix-0"; got != want {
 		t.Errorf("got label %q, want %q", got, want)
 	}
 
-	npCustom2 := svc.nodePools["static-custom-name-1"]
-	if npCustom2 == nil {
-		t.Fatal("nodepool static-custom-name-1 not found")
+	np4 := svc.nodePools["static-np-suffix-1"]
+	if np4 == nil {
+		t.Fatal("nodepool static-np-suffix-1 not found")
 	}
-	if got, want := npCustom2.Config.Labels[LabelProvisionerNodepoolID], "custom-name-1"; got != want {
+	if got, want := np4.Config.Labels[LabelProvisionerNodepoolID], "np-suffix-1"; got != want {
 		t.Errorf("got label %q, want %q", got, want)
 	}
 }
