@@ -65,7 +65,7 @@ var (
 	scheme                = runtime.NewScheme()
 	setupLog              = ctrl.Log.WithName("setup")
 	enableSliceController = os.Getenv("ENABLE_SLICE_CONTROLLER") == "true"
-	enableWebhooks        = os.Getenv("ENABLE_WEBHOOKS") != "false"
+	enableWebhooks        = os.Getenv("ENABLE_WEBHOOKS") == "true"
 )
 
 func init() {

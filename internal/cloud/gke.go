@@ -682,7 +682,7 @@ func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*container
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolName string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error {
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolSuffix string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error {
 	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName, "blockName", blockName)
 
 	var wg sync.WaitGroup
@@ -697,11 +697,7 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockN
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			suffix := blockName
-			if nodepoolName != "" {
-				suffix = nodepoolName
-			}
-			nodePoolID := fmt.Sprintf("%s-%d", suffix, i)
+			nodePoolID := fmt.Sprintf("%s-%d", nodepoolSuffix, i)
 			reservationToConsume := fmt.Sprintf("%s/reservationBlocks/%s", reservationName, blockName)
 			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationToConsume, config)
 			if err != nil {
