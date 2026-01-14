@@ -1,8 +1,7 @@
 package controller
 
 import (
-	"strings"
-
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
@@ -17,9 +16,13 @@ const (
 	tpuV7xAccelerator = "tpu-v7x"
 )
 
-// isStaticNodePool returns true if the nodepool has a name with prefix 'static-', otherwise it returns false.
-func isStaticNodePool(nodePoolName string) bool {
-	return strings.HasPrefix(nodePoolName, "static-")
+// isStaticNodePool returns true if the nodepool has the static nodepool label, otherwise it returns false.
+func isStaticNodePool(labels map[string]string) bool {
+	if labels == nil {
+		return false
+	}
+	_, ok := labels[cloud.LabelTPUProvisionerStaticNodepool]
+	return ok
 }
 
 func isPending(p *corev1.Pod) bool {

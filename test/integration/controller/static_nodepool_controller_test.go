@@ -25,8 +25,8 @@ var _ = Describe("Static Nodepool controller", func() {
 - name: "reservation-1"
   gscBlocks:
   - name: "gsc-block-1"
-    numSubblocks: 2
-    nodepoolSuffix: "test-nodepool"
+    subblocks: "0001-0002"
+    nodepoolPrefix: "test-nodepool"
 `,
 					"nodepoolConfig": `
 machineType: "tpu7x"

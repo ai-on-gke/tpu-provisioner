@@ -25,7 +25,8 @@ const (
 
 	LabelNodePoolHash = keyPrefix + "tpu-provisioner-nodepool-hash"
 
-	LabelProvisionerNodepoolID = "provisioner-nodepool-id"
+	LabelProvisionerNodepoolID        = "provisioner-nodepool-id"
+	LabelTPUProvisionerStaticNodepool = "tpu-provisioner-static-nodepool"
 
 	// AnnotationCopyLabels is a comma-separated list of labels to copy from the Pod to the node pool config (Nodes).
 	AnnotationCopyLabels = "tpu-provisioner.cloud.google.com/copy-labels"
@@ -65,7 +66,7 @@ type Provider interface {
 	DeleteNodePoolForNode(*corev1.Node, string) error
 	DeleteNodePool(string, client.Object, string) error
 	ListNodePools() ([]NodePoolRef, error)
-	EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolSuffix string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error
+	EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolPrefix string, subblocks string, config *StaticNodePoolConfig, concurrency int) error
 }
 
 var ErrDuplicateRequest = errors.New("duplicate request")
@@ -76,6 +77,7 @@ type NodePoolRef struct {
 	CreationTime time.Time
 
 	CreatedForJobSet types.NamespacedName
+	Labels           map[string]string
 
 	Error   bool
 	Message string

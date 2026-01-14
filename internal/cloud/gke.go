@@ -63,7 +63,6 @@ const (
 	maxPodsPerNode = 15
 
 	// Constants for node pool naming conventions.
-	StaticNodepoolPrefix  = "static-"
 	maxJobSetPrefixLength = 34
 	jobKeySuffixLength    = 5
 )
@@ -175,16 +174,23 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 
 	for _, np := range resp.NodePools {
 		var createdForJobSet types.NamespacedName
-		jsName, exists := np.Config.Labels[LabelJobSetName]
-		if exists {
-			jsNamespace, exists := np.Config.Labels[LabelJobSetNamespace]
-			if !exists {
-				jsNamespace = "default"
+		if np.Config != nil && np.Config.Labels != nil {
+			jsName, exists := np.Config.Labels[LabelJobSetName]
+			if exists {
+				jsNamespace, exists := np.Config.Labels[LabelJobSetNamespace]
+				if !exists {
+					jsNamespace = "default"
+				}
+				createdForJobSet = types.NamespacedName{
+					Name:      jsName,
+					Namespace: jsNamespace,
+				}
 			}
-			createdForJobSet = types.NamespacedName{
-				Name:      jsName,
-				Namespace: jsNamespace,
-			}
+		}
+
+		var labels map[string]string
+		if np.Config != nil {
+			labels = np.Config.Labels
 		}
 
 		refs = append(refs, NodePoolRef{
@@ -192,6 +198,7 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 			Error:            np.Status == "ERROR",
 			Message:          np.StatusMessage,
 			CreatedForJobSet: createdForJobSet,
+			Labels:           labels,
 		})
 	}
 
@@ -682,14 +689,31 @@ func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*container
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolSuffix string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error {
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolPrefix string, subblocks string, config *StaticNodePoolConfig, concurrency int) error {
 	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName, "blockName", blockName)
 
+	parts := strings.Split(subblocks, "-")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid subblocks format: %s. expected format is start-end", subblocks)
+	}
+	start, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return fmt.Errorf("invalid start subblock: %s. expected an integer", parts[0])
+	}
+	end, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return fmt.Errorf("invalid end subblock: %s. expected an integer", parts[1])
+	}
+
+	if start > end {
+		return fmt.Errorf("start subblock %d cannot be greater than end subblock %d", start, end)
+	}
+
 	var wg sync.WaitGroup
-	errs := make(chan error, numSubblocks)
+	errs := make(chan error, (end-start)+1)
 	sem := make(chan struct{}, concurrency)
 
-	for i := 0; i < numSubblocks; i++ {
+	for i := start; i <= end; i++ {
 		wg.Add(1)
 		sem <- struct{}{}
 
@@ -697,9 +721,11 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockN
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			nodePoolID := fmt.Sprintf("%s-%d", nodepoolSuffix, i)
-			reservationToConsume := fmt.Sprintf("%s/reservationBlocks/%s", reservationName, blockName)
-			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationToConsume, config)
+			formattedSubblockIndex := fmt.Sprintf("%04d", i)
+			nodePoolID := fmt.Sprintf("%s-%s", nodepoolPrefix, formattedSubblockIndex)
+			subblockName := fmt.Sprintf("%s-subblock-%s", blockName, formattedSubblockIndex)
+			subblockToConsume := fmt.Sprintf("projects/%s/reservations/%s/reservationBlocks/%s/reservationSubBlocks/%s", g.ClusterContext.ProjectID, reservationName, blockName, subblockName)
+			np, err := g.staticNodePoolForSubBlock(nodePoolID, subblockToConsume, config)
 			if err != nil {
 				errs <- fmt.Errorf("determining node pool for static reservation: %w", err)
 				return
@@ -755,10 +781,11 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockN
 	return nil
 }
 
-func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume string, config *StaticNodePoolConfig) (*containerv1beta1.NodePool, error) {
+func (g *GKE) staticNodePoolForSubBlock(nodePoolID, subblockToConsume string, config *StaticNodePoolConfig) (*containerv1beta1.NodePool, error) {
 	labels := map[string]string{
-		LabelNodepoolManager:       LabelNodepoolManagerTPUPodinator,
-		LabelProvisionerNodepoolID: nodePoolID,
+		LabelNodepoolManager:              LabelNodepoolManagerTPUPodinator,
+		LabelProvisionerNodepoolID:        nodePoolID,
+		LabelTPUProvisionerStaticNodepool: "true",
 	}
 	for k, v := range config.NodeLabels {
 		labels[k] = v
@@ -768,7 +795,7 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 		ConsumeReservationType: "SPECIFIC_RESERVATION",
 		Key:                    "compute.googleapis.com/reservation-name",
 		Values: []string{
-			reservationToConsume,
+			subblockToConsume,
 		},
 	}
 
@@ -810,9 +837,7 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 	}
 
 	// Nodepool name must be <= 40 characters.
-	// 'static-' prefix in nodepool name is used to exclude static nodepools from the garbage collection loop
-	// used for nodepools that are dynamically provisioned based on workload requirements
-	name := fmt.Sprintf(StaticNodepoolPrefix+"%s", nodePoolID)
+	name := nodePoolID
 	if len(name) > 40 {
 		return nil, fmt.Errorf("generated nodepool name %q is longer than 40 characters. Please specify a custom suffix for the nodepool name in the tpu-provisioner-static-nodepools-config configmap that meets the length requirements", name)
 	}

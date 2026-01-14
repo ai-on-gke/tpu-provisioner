@@ -205,8 +205,8 @@ data:
     - name: "test-reservation"
       gscBlocks:
         - name: "test-reservation-block-0001"
-          numSubblocks: 1
-          nodepoolSuffix: "my-static-nodepool"
+          subblocks: "0001-0001"
+          nodepoolPrefix: "my-static-nodepool"
   nodepoolConfig: |
     machineType: "tpu7x-standard-4t"
     accelerator: "tpu7x"
@@ -226,7 +226,7 @@ The `ConfigMap` has two main keys: `reservations` and `nodepoolConfig`.
 
 ##### `reservations`
 
-This key contains a list of TPU reservations. Each reservation has a `name` and a list of `gscBlocks`. Each `gscBlock` has a `name`, the `numSubblocks` to provision within that block, and the `nodepoolSuffix` which will be used as the suffix for the nodepool name (prepended with `static-`).
+This key contains a list of TPU reservations. Each reservation has a `name` and a list of `gscBlocks`. Each `gscBlock` has a `name`, the `subblocks` to provision within that block, and the `nodepoolPrefix` which will be used as the prefix for the nodepool name. Nodepools created by the static provisioner are labeled with `tpu-provisioner-static-nodepool` and are omitted from the standard garbage collection loop used for dynamically-provisioned nodepools.
 
 ##### `nodepoolConfig`
 

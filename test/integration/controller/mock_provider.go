@@ -30,7 +30,7 @@ func (p *mockProvider) EnsureNodePoolForPod(pod *corev1.Pod, _ string) error {
 	return nil
 }
 
-func (p *mockProvider) EnsureStaticNodePools(ctx context.Context, reservationName, gscBlockName, nodepoolSuffix string, numSubblocks int, nodepoolConfig *cloud.StaticNodePoolConfig, concurrency int) error {
+func (p *mockProvider) EnsureStaticNodePools(ctx context.Context, reservationName, gscBlockName, nodepoolPrefix string, subblocks string, nodepoolConfig *cloud.StaticNodePoolConfig, concurrency int) error {
 	p.Lock()
 	defer p.Unlock()
 	p.staticNodepoolsCreated[gscBlockName] = true
