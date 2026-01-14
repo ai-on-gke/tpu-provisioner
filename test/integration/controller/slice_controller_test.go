@@ -235,7 +235,7 @@ var _ = Describe("Slice controller", func() {
 		// Create JobSet with initial slice selection
 		js := constructJobSet("test-js-update",
 			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
-			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-1","cube-2"]]}`),
+			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-10","cube-11"]]}`),
 			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "4x4x8")),
 		)
 		js.Namespace = ns.Name
@@ -249,7 +249,7 @@ var _ = Describe("Slice controller", func() {
 				SliceSpec: v1beta1.SliceSpec{
 					Type:         "tpu7x",
 					Topology:     "4x4x8",
-					PartitionIds: []string{"cube-1", "cube-2"},
+					PartitionIds: []string{"cube-10", "cube-11"},
 				},
 				Replicas: 1,
 			},
@@ -262,7 +262,7 @@ var _ = Describe("Slice controller", func() {
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(js), &updatedJS)).To(Succeed())
 
 		// Update the annotation to select different cubes
-		updatedJS.Annotations[controller.SliceSelectionAnnotation] = `{"worker":[["cube-3","cube-4"]]}`
+		updatedJS.Annotations[controller.SliceSelectionAnnotation] = `{"worker":[["cube-12","cube-13"]]}`
 		Expect(k8sClient.Update(ctx, &updatedJS)).To(Succeed())
 
 		By("Verifying Slices are recreated with updated PartitionIds")
@@ -271,7 +271,7 @@ var _ = Describe("Slice controller", func() {
 				SliceSpec: v1beta1.SliceSpec{
 					Type:         "tpu7x",
 					Topology:     "4x4x8",
-					PartitionIds: []string{"cube-3", "cube-4"},
+					PartitionIds: []string{"cube-12", "cube-13"},
 				},
 				Replicas: 1,
 			},
@@ -499,6 +499,103 @@ var _ = Describe("Slice controller", func() {
 			// JobSet should remain unsuspended (nil or false)
 			return updatedJS.Spec.Suspend == nil || !*updatedJS.Spec.Suspend
 		}, 3*time.Second, time.Second).Should(BeTrue())
+	})
+	It("should not create a Slice if there is a partition ID overlap, but create it once overlap is removed", func() {
+		ctx := context.Background()
+		// Create test namespace
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-ns-",
+			},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+		// Clean up temporary namespace after test
+		defer func() {
+			Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
+		}()
+
+		// 1. Create a conflicting Slice manually
+		conflictingSlice := &v1beta1.Slice{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "conflicting-slice",
+				Namespace: ns.Name, // Creating in the same namespace, though conflict check is global via indexer
+				Labels: map[string]string{
+					controller.SliceOwnerKindLabel:      "some-other-kind",
+					controller.SliceOwnerNameLabel:      "some-other-owner",
+					controller.SliceOwnerNamespaceLabel: ns.Name,
+				},
+			},
+			Spec: v1beta1.SliceSpec{
+				Type:         "tpu7x",
+				Topology:     "4x4x4",
+				PartitionIds: []string{"duplicate-cube"},
+			},
+		}
+		By("Creating a conflicting Slice")
+		Expect(k8sClient.Create(ctx, conflictingSlice)).To(Succeed())
+
+		// 2. Create JobSet that needs 2 slices: one safe, one conflicting
+		js := constructJobSet("test-js-overlap",
+			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
+			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["safe-cube"],["duplicate-cube"]]}`),
+			withReplicatedJob("worker", 2, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
+		)
+		js.Namespace = ns.Name
+
+		By("Creating JobSet with partial overlap")
+		Expect(k8sClient.Create(ctx, js)).To(Succeed())
+
+		// 3. Assert that ONLY the safe Slice is created initially
+		expectedSafeSlice := []ExpectedSliceSpec{
+			{
+				SliceSpec: v1beta1.SliceSpec{
+					Type:         "tpu7x",
+					Topology:     "4x4x4",
+					PartitionIds: []string{"safe-cube"},
+				},
+				Replicas: 1,
+			},
+		}
+
+		By("Verifying only the safe Slice is created")
+		assertSlicesCreated(ctx, js, expectedSafeSlice)
+
+		// Ensure the conflicting one is NOT created for a extended period
+		Consistently(func() int {
+			var sliceList v1beta1.SliceList
+			k8sClient.List(ctx, &sliceList, client.MatchingLabels{
+				controller.SliceOwnerNameLabel: js.Name,
+			})
+			return len(sliceList.Items)
+		}, 3*time.Second, time.Second).Should(Equal(1))
+
+		// 4. Delete the conflicting Slice
+		By("Deleting the conflicting Slice")
+		Expect(k8sClient.Delete(ctx, conflictingSlice)).To(Succeed())
+
+		// 5. Assert that the second Slice is now created
+		expectedAllSlices := []ExpectedSliceSpec{
+			{
+				SliceSpec: v1beta1.SliceSpec{
+					Type:         "tpu7x",
+					Topology:     "4x4x4",
+					PartitionIds: []string{"safe-cube"},
+				},
+				Replicas: 1,
+			},
+			{
+				SliceSpec: v1beta1.SliceSpec{
+					Type:         "tpu7x",
+					Topology:     "4x4x4",
+					PartitionIds: []string{"duplicate-cube"},
+				},
+				Replicas: 1,
+			},
+		}
+
+		By("Verifying the second Slice is created after conflict removal")
+		assertSlicesCreated(ctx, js, expectedAllSlices)
 	})
 })
 

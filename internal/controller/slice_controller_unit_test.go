@@ -530,6 +530,106 @@ func TestJobsetSlices(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "JobSet with duplicate partition IDs in slice selection",
+			jobSet: &jobset.JobSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-jobset",
+					Namespace: "default",
+					UID:       testUID,
+					Annotations: map[string]string{
+						SliceSelectionAnnotation: `{"worker":[["cube-1"],["cube-1"]]}`,
+					},
+				},
+				Spec: jobset.JobSetSpec{
+					ReplicatedJobs: []jobset.ReplicatedJob{
+						{
+							Name:     "worker",
+							Replicas: 2,
+							Template: batchv1.JobTemplateSpec{
+								Spec: batchv1.JobSpec{
+									Template: corev1.PodTemplateSpec{
+										ObjectMeta: metav1.ObjectMeta{
+											Annotations: map[string]string{
+												topologyAnnotation: "4x4x4",
+											},
+										},
+										Spec: corev1.PodSpec{
+											NodeSelector: map[string]string{
+												acceleratorSelector: tpu7xAccelerator,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want:      nil,
+			wantErr:   true,
+			errSubstr: `duplicate partition ID "cube-1" found`,
+		},
+		{
+			name: "JobSet with duplicate partition IDs across different workers",
+			jobSet: &jobset.JobSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-jobset",
+					Namespace: "default",
+					UID:       testUID,
+					Annotations: map[string]string{
+						SliceSelectionAnnotation: `{"worker-1":[["cube-1"]],"worker-2":[["cube-1"]]}`,
+					},
+				},
+				Spec: jobset.JobSetSpec{
+					ReplicatedJobs: []jobset.ReplicatedJob{
+						{
+							Name:     "worker-1",
+							Replicas: 1,
+							Template: batchv1.JobTemplateSpec{
+								Spec: batchv1.JobSpec{
+									Template: corev1.PodTemplateSpec{
+										ObjectMeta: metav1.ObjectMeta{
+											Annotations: map[string]string{
+												topologyAnnotation: "4x4x4",
+											},
+										},
+										Spec: corev1.PodSpec{
+											NodeSelector: map[string]string{
+												acceleratorSelector: tpu7xAccelerator,
+											},
+										},
+									},
+								},
+							},
+						},
+						{
+							Name:     "worker-2",
+							Replicas: 1,
+							Template: batchv1.JobTemplateSpec{
+								Spec: batchv1.JobSpec{
+									Template: corev1.PodTemplateSpec{
+										ObjectMeta: metav1.ObjectMeta{
+											Annotations: map[string]string{
+												topologyAnnotation: "4x4x4",
+											},
+										},
+										Spec: corev1.PodSpec{
+											NodeSelector: map[string]string{
+												acceleratorSelector: tpu7xAccelerator,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want:      nil,
+			wantErr:   true,
+			errSubstr: `duplicate partition ID "cube-1" found`,
+		},
 	}
 
 	for _, tt := range tests {

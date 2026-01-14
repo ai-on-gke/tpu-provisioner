@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
@@ -134,7 +135,35 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Create new slices
+	var requeueAfter time.Duration
 	for _, slice := range toCreate {
+		skipped := false
+		// Check for overlap with existing Slices in the cluster using the index
+		for _, p := range slice.Spec.PartitionIds {
+			var overlappingSlices v1beta1.SliceList
+			if err := r.List(ctx, &overlappingSlices, client.MatchingFields{slicePartitionIdsField: p}); err != nil {
+				return ctrl.Result{}, fmt.Errorf("listing slices with partition %s: %w", p, err)
+			}
+
+			if len(overlappingSlices.Items) > 0 {
+				var names []string
+				for _, s := range overlappingSlices.Items {
+					names = append(names, s.Name)
+				}
+				// NOTE: This could be optimized to use an event-based trigger, instead
+				// of a polling-based trigger, but likely not worth the complexity.
+				requeueAfter = time.Second
+				log.Info("Skipping creation of Slice due to PartitionId overlap with existing Slice(s) in cluster, will requeue",
+					"requeueAfter", requeueAfter, "overlappingSliceNames", names)
+				skipped = true
+				break
+			}
+		}
+
+		if skipped {
+			continue
+		}
+
 		log.Info("Creating Slice for JobSet", "slice", slice.Name,
 			"partitionCount", len(slice.Spec.PartitionIds))
 
@@ -150,10 +179,20 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
+const slicePartitionIdsField = "spec.partitionIds"
+
 func (r *SliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Register index for PartitionIds to allow quick lookup of slices by partition
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1beta1.Slice{}, slicePartitionIdsField, func(rawObj client.Object) []string {
+		slice := rawObj.(*v1beta1.Slice)
+		return slice.Spec.PartitionIds
+	}); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&jobset.JobSet{}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
@@ -210,6 +249,8 @@ func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, error) {
 		return nil, fmt.Errorf("parsing slice selection: %w", err)
 	}
 
+	usedPartitions := make(map[string]bool)
+
 	for _, rj := range js.Spec.ReplicatedJobs {
 		podNodeSelector := rj.Template.Spec.Template.Spec.NodeSelector
 		if podNodeSelector == nil {
@@ -251,6 +292,14 @@ func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, error) {
 				s.Spec.PartitionIds = cubeSelection[i]
 			}
 			slices = append(slices, s)
+
+			// Check for internal overlap in the desired state
+			for _, p := range s.Spec.PartitionIds {
+				if usedPartitions[p] {
+					return nil, fmt.Errorf("duplicate partition ID %q found in slice selection", p)
+				}
+				usedPartitions[p] = true
+			}
 		}
 	}
 
