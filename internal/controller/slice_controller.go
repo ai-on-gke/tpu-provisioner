@@ -8,6 +8,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -87,8 +88,10 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if slice.DeletionTimestamp == nil {
 				log.Info("Deleting Slice for JobSet cleanup", "slice", slice.Name)
 				if err := r.Delete(ctx, &slice); err != nil && !apierrors.IsNotFound(err) {
+					r.Recorder.Eventf(&js, corev1.EventTypeWarning, "SliceDeleteFailed", "Failed to delete Slice %s: %v", slice.Name, err)
 					return ctrl.Result{}, fmt.Errorf("deleting slice %s: %w", slice.Name, err)
 				}
+				r.Recorder.Eventf(&js, corev1.EventTypeNormal, "SliceDeleted", "Deleted Slice %s", slice.Name)
 			}
 		}
 
@@ -130,8 +133,10 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		log.Info("Deleting Slice due to NodeSelector change", "slice", slice.Name)
 		if err := r.Delete(ctx, &slice); err != nil {
+			r.Recorder.Eventf(&js, corev1.EventTypeWarning, "SliceDeleteFailed", "Failed to delete Slice %s due to NodeSelector change: %v", slice.Name, err)
 			return ctrl.Result{}, fmt.Errorf("deleting slice %s: %w", slice.Name, err)
 		}
+		r.Recorder.Eventf(&js, corev1.EventTypeNormal, "SliceDeleted", "Deleted Slice %s due to NodeSelector change", slice.Name)
 	}
 
 	// Create new slices
@@ -155,6 +160,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				requeueAfter = time.Second
 				log.Info("Skipping creation of Slice due to PartitionId overlap with existing Slice(s) in cluster, will requeue",
 					"requeueAfter", requeueAfter, "overlappingSliceNames", names)
+				r.Recorder.Eventf(&js, corev1.EventTypeWarning, "SliceCreateSkipped", "Skipping creation of Slice %s due to PartitionId overlap with existing Slice(s): %v", slice.Name, names)
 				skipped = true
 				break
 			}
@@ -168,8 +174,10 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			"partitionCount", len(slice.Spec.PartitionIds))
 
 		if err := r.Create(ctx, &slice); err != nil {
+			r.Recorder.Eventf(&js, corev1.EventTypeWarning, "SliceCreateFailed", "Failed to create Slice %s: %v", slice.Name, err)
 			return ctrl.Result{}, fmt.Errorf("creating slice %s: %w", slice.Name, err)
 		}
+		r.Recorder.Eventf(&js, corev1.EventTypeNormal, "SliceCreated", "Created Slice %s", slice.Name)
 	}
 
 	// Handle sync mode: suspend JobSet until all Slices are Ready
@@ -382,9 +390,10 @@ func (r *SliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet,
 		suspendValue := false
 		js.Spec.Suspend = &suspendValue
 		if err := r.Update(ctx, js); err != nil {
+			r.Recorder.Event(js, corev1.EventTypeNormal, "JobSetUnsuspendFailed", "Failed to unsuspend JobSet")
 			return fmt.Errorf("unsuspending jobset: %w", err)
 		}
-		r.Recorder.Event(js, "Normal", "Unsuspended", "All Slices are Ready")
+		r.Recorder.Event(js, corev1.EventTypeNormal, "JobSetUnsuspended", "All Slices are Ready")
 	} else if !slicesReady && !jsCurrentlySuspended {
 		// Not all slices are ready, suspend the JobSet
 		log.Info("Not all Slices are Ready, suspending JobSet",
@@ -393,9 +402,10 @@ func (r *SliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet,
 		suspendValue := true
 		js.Spec.Suspend = &suspendValue
 		if err := r.Update(ctx, js); err != nil {
+			r.Recorder.Event(js, corev1.EventTypeNormal, "JobSetSuspendFailed", "Failed to suspend JobSet")
 			return fmt.Errorf("suspending jobset: %w", err)
 		}
-		r.Recorder.Event(js, "Normal", "Suspended", "Waiting for all Slices to be Ready")
+		r.Recorder.Event(js, corev1.EventTypeNormal, "JobSetSuspended", "Waiting for all Slices to be Ready")
 	}
 
 	return nil
