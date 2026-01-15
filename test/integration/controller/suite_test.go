@@ -26,7 +26,6 @@ import (
 	. "github.com/onsi/gomega"
 	"go.uber.org/zap/zapcore"
 
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -49,13 +48,9 @@ var (
 	cfg       *rest.Config
 	k8sClient client.Client
 	testEnv   *envtest.Environment
-	provider  = &mockProvider{
-		created:                make(map[types.NamespacedName]bool),
-		deleted:                make(map[string]time.Time),
-		staticNodepoolsCreated: make(map[string]bool),
-	}
-	ctx    context.Context
-	cancel context.CancelFunc
+	provider  = newMockProvider()
+	ctx       context.Context
+	cancel    context.CancelFunc
 )
 
 const (

@@ -47,7 +47,7 @@ type Reservation struct {
 	GscBlocks []GscBlock `yaml:"gscBlocks"`
 }
 
-// StaticNodepoolReconciler reconciles static nodepools based on a ConfigMap.
+// StaticNodepoolReconciler reconciles static nodepools based on a configmap.
 type StaticNodepoolReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -70,7 +70,32 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var cm corev1.ConfigMap
 	if err := r.Get(ctx, req.NamespacedName, &cm); err != nil {
 		if apierrors.IsNotFound(err) {
-			lg.Info("Static nodepools config map not found. Skipping reconciliation.", "configmap", req.NamespacedName.String())
+			// If the configmap is not found, the reconciler assumes it was deleted and cleans up all nodepools
+			// in the cluster whose labels indicate that they are static nodepools created by the tpu-provisioner
+			lg.Info("Static nodepools configmap not found. Initiating cleanup of all static nodepools for this cluster.", "configmap", req.NamespacedName.String())
+
+			existingNodePools, listErr := r.Provider.ListNodePools()
+			if listErr != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to list existing nodepools during configmap deletion cleanup: %w", listErr)
+			}
+
+			nodepoolsToDelete := []string{}
+			for _, np := range existingNodePools {
+				// Assumes all existing static nodepools were managed by the now-deleted configmap since
+				// there should only be one static nodepools configmap per cluster.
+				if np.Labels != nil && np.Labels[cloud.LabelTPUProvisionerStaticNodepool] == "true" {
+					nodepoolsToDelete = append(nodepoolsToDelete, np.Name)
+				}
+			}
+
+			if len(nodepoolsToDelete) > 0 {
+				lg.Info("Deleting static nodepools that were previously managed by the deleted configmap", "nodepools", nodepoolsToDelete)
+				// Pass nil for eventObj as the configmap is already deleted.
+				errs := r.Provider.DeleteStaticNodePools(ctx, nodepoolsToDelete, r.StaticNodepoolDeleteConcurrency, nil, "static nodepools configmap deleted")
+				if len(errs) > 0 {
+					return ctrl.Result{}, fmt.Errorf("failed to delete some static nodepools during configmap cleanup: %v", errs)
+				}
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to get configmap %s: %w", req.NamespacedName.String(), err)

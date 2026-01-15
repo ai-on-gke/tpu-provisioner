@@ -2,6 +2,7 @@ package controllertest
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -17,9 +18,17 @@ type mockProvider struct {
 	sync.Mutex
 	created                map[types.NamespacedName]bool
 	deleted                map[string]time.Time
-	staticNodepoolsCreated map[string]bool
+	staticNodepoolsCreated map[string]cloud.NodePoolRef
 
 	cloud.Provider
+}
+
+func newMockProvider() *mockProvider {
+	return &mockProvider{
+		created:                make(map[types.NamespacedName]bool),
+		deleted:                make(map[string]time.Time),
+		staticNodepoolsCreated: make(map[string]cloud.NodePoolRef),
+	}
 }
 
 func (p *mockProvider) NodePoolLabelKey() string { return cloud.GKENodePoolNameLabel }
@@ -34,7 +43,25 @@ func (p *mockProvider) EnsureNodePoolForPod(pod *corev1.Pod, _ string) error {
 func (p *mockProvider) EnsureStaticNodePools(ctx context.Context, reservationName, gscBlockName, nodepoolPrefix string, subblocks string, nodepoolConfig *cloud.StaticNodePoolConfig, concurrency int, _ client.Object) error {
 	p.Lock()
 	defer p.Unlock()
-	p.staticNodepoolsCreated[gscBlockName] = true
+
+	// Parse subblocks and generate nodepool names
+	start, end, err := cloud.ParseSubBlocks(subblocks)
+	if err != nil {
+		return fmt.Errorf("parsing subblocks in mock: %w", err)
+	}
+
+	for i := start; i <= end; i++ {
+		formattedSubblockIndex := fmt.Sprintf("%04d", i)
+		nodePoolID := fmt.Sprintf("%s-%s", nodepoolPrefix, formattedSubblockIndex)
+
+		p.staticNodepoolsCreated[nodePoolID] = cloud.NodePoolRef{
+			Name: nodePoolID,
+			Labels: map[string]string{
+				cloud.LabelTPUProvisionerStaticNodepool: "true",
+			},
+			CreationTime: time.Now(),
+		}
+	}
 	return nil
 }
 
@@ -44,18 +71,18 @@ func (p *mockProvider) getCreated(nn types.NamespacedName) bool {
 	return p.created[nn]
 }
 
-func (p *mockProvider) getStaticNodepoolsCreated(gscBlockName string) bool {
-	p.Lock()
-	defer p.Unlock()
-	return p.staticNodepoolsCreated[gscBlockName]
-}
-
 func (p *mockProvider) DeleteNodePoolForNode(node *corev1.Node, why string) error {
 	return p.DeleteNodePool(node.Name, node, why)
 }
 
 func (p *mockProvider) ListNodePools() ([]cloud.NodePoolRef, error) {
-	return []cloud.NodePoolRef{}, nil
+	p.Lock()
+	defer p.Unlock()
+	var refs []cloud.NodePoolRef
+	for _, ref := range p.staticNodepoolsCreated {
+		refs = append(refs, ref)
+	}
+	return refs, nil
 }
 
 func (p *mockProvider) DeleteNodePool(name string, eventObj client.Object, why string) error {
@@ -64,6 +91,7 @@ func (p *mockProvider) DeleteNodePool(name string, eventObj client.Object, why s
 	if _, exists := p.deleted[name]; !exists {
 		p.deleted[name] = time.Now()
 	}
+	delete(p.staticNodepoolsCreated, name)
 	return nil
 }
 
