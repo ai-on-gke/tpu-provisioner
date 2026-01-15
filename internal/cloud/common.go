@@ -66,7 +66,8 @@ type Provider interface {
 	DeleteNodePoolForNode(*corev1.Node, string) error
 	DeleteNodePool(string, client.Object, string) error
 	ListNodePools() ([]NodePoolRef, error)
-	EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolPrefix string, subblocks string, config *StaticNodePoolConfig, concurrency int) error
+	EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolPrefix string, subblocks string, config *StaticNodePoolConfig, concurrency int, eventObj client.Object) error
+	DeleteStaticNodePools(ctx context.Context, nodepoolNames []string, concurrency int, eventObj client.Object, why string) []error
 }
 
 var ErrDuplicateRequest = errors.New("duplicate request")

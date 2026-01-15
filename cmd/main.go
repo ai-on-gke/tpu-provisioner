@@ -115,6 +115,7 @@ func main() {
 
 		StaticNodepoolCreateConcurrency int           `envconfig:"STATIC_NODEPOOL_CREATE_CONCURRENCY" default:"3"`
 		StaticNodepoolCreateTimeout     time.Duration `envconfig:"STATIC_NODEPOOL_CREATE_TIMEOUT" default:"10m"`
+		StaticNodepoolDeleteConcurrency int           `envconfig:"STATIC_NODEPOOL_DELETE_CONCURRENCY" default:"3"`
 
 		PodNamespace string `envconfig:"POD_NAMESPACE"`
 	}
@@ -311,13 +312,14 @@ func main() {
 	}
 
 	if err := (&controller.StaticNodepoolReconciler{
-		Client:                      mgr.GetClient(),
-		Scheme:                      mgr.GetScheme(),
-		Recorder:                    mgr.GetEventRecorderFor("tpu-provisioner"),
-		Provider:                    provider,
-		Concurrency:                 cfg.StaticNodepoolCreateConcurrency,
-		StaticNodepoolCreateTimeout: cfg.StaticNodepoolCreateTimeout,
-		Namespace:                   cfg.PodNamespace,
+		Client:                          mgr.GetClient(),
+		Scheme:                          mgr.GetScheme(),
+		Recorder:                        mgr.GetEventRecorderFor("tpu-provisioner"),
+		Provider:                        provider,
+		StaticNodepoolCreateConcurrency: cfg.StaticNodepoolCreateConcurrency,
+		StaticNodepoolDeleteConcurrency: cfg.StaticNodepoolDeleteConcurrency,
+		StaticNodepoolCreateTimeout:     cfg.StaticNodepoolCreateTimeout,
+		Namespace:                       cfg.PodNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "StaticNodepoolReconciler")
 		os.Exit(1)

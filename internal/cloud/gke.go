@@ -689,24 +689,12 @@ func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*container
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolPrefix string, subblocks string, config *StaticNodePoolConfig, concurrency int) error {
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolPrefix string, subblocks string, config *StaticNodePoolConfig, concurrency int, eventObj client.Object) error {
 	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName, "blockName", blockName)
 
-	parts := strings.Split(subblocks, "-")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid subblocks format: %s. expected format is start-end", subblocks)
-	}
-	start, err := strconv.Atoi(parts[0])
+	start, end, err := ParseSubBlocks(subblocks)
 	if err != nil {
-		return fmt.Errorf("invalid start subblock: %s. expected an integer", parts[0])
-	}
-	end, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return fmt.Errorf("invalid end subblock: %s. expected an integer", parts[1])
-	}
-
-	if start > end {
-		return fmt.Errorf("start subblock %d cannot be greater than end subblock %d", start, end)
+		return err
 	}
 
 	var wg sync.WaitGroup
@@ -748,15 +736,19 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockN
 				}
 
 				log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
+				g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationStarted, "Starting creation of static Node Pool %s", np.Name)
 				if err := g.NodePools.Create(ctx, req, OpCallbacks{
 					ReqFailure: func(err error) {
 						log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
+						g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Request to create Node Pool %s failed: %v.", np.Name, err)
 					},
 					OpFailure: func(err error) {
 						log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
+						g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Operation to create Node Pool %s failed: %v.", np.Name, err)
 					},
 					Success: func() {
 						log.Info("successfully created static node pool", "nodePoolName", np.Name)
+						g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationSucceeded, "Successfully created Node Pool %s.", np.Name)
 					},
 				}); err != nil {
 					errs <- err
@@ -779,6 +771,36 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockN
 	}
 
 	return nil
+}
+
+// ParseSubBlocks parses a string of the form "startSubBlockIndex-endSubBlockIndex" or "startSubBlockIndex" into integers.
+func ParseSubBlocks(subblocks string) (int, int, error) {
+	if !strings.Contains(subblocks, "-") {
+		start, err := strconv.Atoi(subblocks)
+		if err != nil {
+			return 0, 0, fmt.Errorf("invalid subblock: %s. expected an integer", subblocks)
+		}
+		return start, start, nil
+	}
+
+	parts := strings.Split(subblocks, "-")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid subblocks format: %s. expected format is start-end", subblocks)
+	}
+	start, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid start subblock: %s. expected an integer", parts[0])
+	}
+	end, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid end subblock: %s. expected an integer", parts[1])
+	}
+
+	if start > end {
+		return 0, 0, fmt.Errorf("start subblock %d cannot be greater than end subblock %d", start, end)
+	}
+
+	return start, end, nil
 }
 
 func (g *GKE) staticNodePoolForSubBlock(nodePoolID, subblockToConsume string, config *StaticNodePoolConfig) (*containerv1beta1.NodePool, error) {
@@ -934,4 +956,46 @@ func nodePoolSelectiveHash(np *containerv1beta1.NodePool) (string, error) {
 	}
 	h.Write(jsn)
 	return rand.SafeEncodeString(fmt.Sprint(h.Sum32())), nil
+}
+
+// DeleteStaticNodePools deletes a list of nodepools concurrently.
+func (g *GKE) DeleteStaticNodePools(ctx context.Context, nodepoolNames []string, concurrency int, eventObj client.Object, why string) []error {
+	lg := logf.FromContext(ctx)
+
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	if len(nodepoolNames) < concurrency {
+		concurrency = len(nodepoolNames)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, len(nodepoolNames))
+	sem := make(chan struct{}, concurrency)
+
+	for _, name := range nodepoolNames {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(npName string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			lg.Info("Deleting static nodepool", "nodepool", npName)
+			if err := g.DeleteNodePool(npName, eventObj, why); err != nil {
+				errs <- fmt.Errorf("failed to delete nodepool %s: %w", npName, err)
+			}
+		}(name)
+	}
+
+	lg.Info("Waiting for all goroutines to finish deleting static nodepools.")
+	wg.Wait()
+	close(errs)
+
+	var allErrors []error
+	for err := range errs {
+		allErrors = append(allErrors, err)
+	}
+
+	return allErrors
 }

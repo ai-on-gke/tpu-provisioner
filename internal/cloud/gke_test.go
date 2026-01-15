@@ -31,7 +31,7 @@ func TestEnsureStaticNodePool(t *testing.T) {
 		NodeCount:   16,
 	}
 	// This call should create np-name-0001 and np-name-0002
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "np-name-block", "np-name", "0001-0002", npNameConfig, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-1", "np-name-block", "np-name", "0001-0002", npNameConfig, 1, nil); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["np-name-0001"]; got != 1 {
@@ -69,7 +69,7 @@ func TestEnsureStaticNodePool(t *testing.T) {
 		NodeCount:   16,
 	}
 	// This call should create np-prefix-0001 and np-prefix-0002
-	if err := gke.EnsureStaticNodePools(ctx, "res-2", "block-name-ignored", "np-prefix", "0001-0002", npPrefixConfig, 1); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, "res-2", "block-name-ignored", "np-prefix", "0001-0002", npPrefixConfig, 1, nil); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["np-prefix-0001"]; got != 1 {
@@ -1437,6 +1437,75 @@ func TestParseAdditionalNodeNetworks(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.expected, result); diff != "" {
 				t.Errorf("parseAdditionalNodeNetworks() returned diff (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestParseSubBlocks(t *testing.T) {
+	testCases := []struct {
+		name          string
+		input         string
+		expectedStart int
+		expectedEnd   int
+		expectedError bool
+	}{
+		{
+			name:          "valid range",
+			input:         "1-10",
+			expectedStart: 1,
+			expectedEnd:   10,
+			expectedError: false,
+		},
+		{
+			name:          "single subblock",
+			input:         "5",
+			expectedStart: 5,
+			expectedEnd:   5,
+			expectedError: false,
+		},
+		{
+			name:          "single subblock with leading zeros",
+			input:         "0005",
+			expectedStart: 5,
+			expectedEnd:   5,
+			expectedError: false,
+		},
+		{
+			name:          "invalid range, start > end",
+			input:         "10-1",
+			expectedError: true,
+		},
+		{
+			name:          "invalid single subblock, not a number",
+			input:         "abc",
+			expectedError: true,
+		},
+		{
+			name:          "invalid range, not numbers",
+			input:         "a-b",
+			expectedError: true,
+		},
+		{
+			name:          "empty string",
+			input:         "",
+			expectedError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			start, end, err := ParseSubBlocks(tc.input)
+			if (err != nil) != tc.expectedError {
+				t.Fatalf("ParseSubBlocks() error = %v, wantErr %v", err, tc.expectedError)
+			}
+			if !tc.expectedError {
+				if start != tc.expectedStart {
+					t.Errorf("ParseSubBlocks() start = %v, want %v", start, tc.expectedStart)
+				}
+				if end != tc.expectedEnd {
+					t.Errorf("ParseSubBlocks() end = %v, want %v", end, tc.expectedEnd)
+				}
 			}
 		})
 	}
