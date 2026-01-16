@@ -62,7 +62,7 @@ func (p *mockProvider) EnsureNodePoolForPod(pod *corev1.Pod, _ string) error {
 	return nil
 }
 
-func (p *mockProvider) DiffStaticNodePools(existingNodepools []cloud.NodePoolRef, desiredNodepools []*cloud.DesiredStaticNodePool) ([]*cloud.DesiredStaticNodePool, []string, error) {
+func (p *mockProvider) DiffStaticNodePools(existingNodepools []cloud.NodePoolRef, desiredNodepools []*cloud.DesiredStaticNodePool) ([]*cloud.DesiredStaticNodePool, []string, []string, []string, error) {
 	return p.gke.DiffStaticNodePools(existingNodepools, desiredNodepools)
 }
 

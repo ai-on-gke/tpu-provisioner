@@ -79,7 +79,7 @@ type Provider interface {
 	ListNodePools() ([]NodePoolRef, error)
 	EnsureStaticNodePools(ctx context.Context, desiredNodePools []*DesiredStaticNodePool, concurrency int, eventObj client.Object) error
 	DeleteStaticNodePools(ctx context.Context, nodepoolNames []string, concurrency int, eventObj client.Object, why string) []error
-	DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepools []*DesiredStaticNodePool) (toCreate []*DesiredStaticNodePool, toDelete []string, err error)
+	DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepools []*DesiredStaticNodePool) (toCreate []*DesiredStaticNodePool, toDeleteMissing []string, toDeleteUpdate []string, toDeleteError []string, err error)
 }
 
 var ErrDuplicateRequest = errors.New("duplicate request")

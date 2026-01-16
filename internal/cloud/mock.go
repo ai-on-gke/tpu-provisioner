@@ -27,6 +27,6 @@ func (m *Mock) EnsureStaticNodePools(context.Context, []*DesiredStaticNodePool, 
 func (m *Mock) DeleteStaticNodePools(context.Context, []string, int, client.Object, string) []error {
 	return nil
 }
-func (m *Mock) DiffStaticNodePools([]NodePoolRef, []*DesiredStaticNodePool) ([]*DesiredStaticNodePool, []string, error) {
-	return nil, nil, nil
+func (m *Mock) DiffStaticNodePools([]NodePoolRef, []*DesiredStaticNodePool) ([]*DesiredStaticNodePool, []string, []string, []string, error) {
+	return nil, nil, nil, nil, nil
 }

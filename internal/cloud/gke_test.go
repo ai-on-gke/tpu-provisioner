@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,6 +14,7 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	container "google.golang.org/api/container/v1beta1"
 	"google.golang.org/api/googleapi"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -1436,11 +1438,11 @@ func Test_nodePoolSelectiveHash(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			hashA, err := NodePoolHash(c.A)
+			hashA, err := nodePoolHash(c.A)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
-			hashB, err := NodePoolHash(c.B)
+			hashB, err := nodePoolHash(c.B)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -1619,6 +1621,164 @@ func TestParseSubBlocks(t *testing.T) {
 				if end != tc.expectedEnd {
 					t.Errorf("ParseSubBlocks() end = %v, want %v", end, tc.expectedEnd)
 				}
+			}
+		})
+	}
+}
+
+func TestDiffStaticNodePools(t *testing.T) {
+	gke, _ := newTestGKE(t)
+
+	// Helper to create a DesiredStaticNodePool and its expected hash
+	createDesired := func(name string, machineType string) (*DesiredStaticNodePool, string) {
+		config := &StaticNodePoolConfig{
+			MachineType: machineType,
+			Accelerator: "tpu-v5p-slice",
+			Topology:    "2x2x2",
+			NodeCount:   2,
+			NodeLabels:  map[string]string{"foo": "bar"},
+		}
+		desired := &DesiredStaticNodePool{
+			Name:              name,
+			SubblockToConsume: "projects/test-project/reservations/res-1/reservationBlocks/block-1/reservationSubBlocks/" + name,
+			Config:            config,
+		}
+		// Calculate expected hash
+		np, err := gke.StaticNodePoolForSubBlock(name, desired.SubblockToConsume, config)
+		if err != nil {
+			t.Fatalf("failed to create node pool for test helper: %v", err)
+		}
+		hash, ok := np.Config.Labels[LabelNodePoolHash]
+		if !ok {
+			t.Fatalf("hash not found in test helper")
+		}
+		return desired, hash
+	}
+
+	desiredA, hashA := createDesired("pool-a", "ct5p-hightpu-4t")
+	desiredB, _ := createDesired("pool-b", "ct5p-hightpu-4t")
+	desiredAUpdated, hashAUpdated := createDesired("pool-a", "ct5p-hightpu-8t") // Different machine type
+
+	if hashA == hashAUpdated {
+		t.Fatalf("hashes should strictly differ for different machine types")
+	}
+
+	tests := []struct {
+		name              string
+		existing          []NodePoolRef
+		desired           []*DesiredStaticNodePool
+		wantCreate        []string
+		wantDeleteMissing []string
+		wantDeleteUpdate  []string
+		wantDeleteError   []string
+	}{
+		{
+			name:       "Create New Nodepool",
+			existing:   []NodePoolRef{},
+			desired:    []*DesiredStaticNodePool{desiredA},
+			wantCreate: []string{"pool-a"},
+		},
+		{
+			name: "No Change",
+			existing: []NodePoolRef{
+				{Name: "pool-a", Labels: map[string]string{LabelNodePoolHash: hashA, LabelTPUProvisionerStaticNodepool: "true"}},
+			},
+			desired: []*DesiredStaticNodePool{desiredA},
+		},
+		{
+			name: "Delete Missing",
+			existing: []NodePoolRef{
+				{Name: "pool-a", Labels: map[string]string{LabelNodePoolHash: hashA, LabelTPUProvisionerStaticNodepool: "true"}},
+			},
+			desired:           []*DesiredStaticNodePool{},
+			wantDeleteMissing: []string{"pool-a"},
+		},
+		{
+			name: "Delete Update (Hash Mismatch)",
+			existing: []NodePoolRef{
+				{Name: "pool-a", Labels: map[string]string{LabelNodePoolHash: hashA, LabelTPUProvisionerStaticNodepool: "true"}},
+			},
+			desired:          []*DesiredStaticNodePool{desiredAUpdated},
+			wantCreate:       []string{"pool-a"},
+			wantDeleteUpdate: []string{"pool-a"},
+		},
+		{
+			name: "Legacy Nodepool (No Hash)",
+			existing: []NodePoolRef{
+				{Name: "pool-a", Labels: map[string]string{LabelTPUProvisionerStaticNodepool: "true"}},
+			},
+			desired: []*DesiredStaticNodePool{desiredA},
+		},
+		{
+			name: "Non-Static Nodepool (Ignored)",
+			existing: []NodePoolRef{
+				{Name: "pool-b", Labels: map[string]string{}},
+			},
+			desired: []*DesiredStaticNodePool{},
+		},
+		{
+			name: "Multiple Actions",
+			existing: []NodePoolRef{
+				{Name: "pool-a", Labels: map[string]string{LabelNodePoolHash: hashA, LabelTPUProvisionerStaticNodepool: "true"}},       // Unchanged
+				{Name: "pool-b", Labels: map[string]string{LabelNodePoolHash: "old-hash", LabelTPUProvisionerStaticNodepool: "true"}},  // Update
+				{Name: "pool-c", Labels: map[string]string{LabelNodePoolHash: "some-hash", LabelTPUProvisionerStaticNodepool: "true"}}, // Delete
+			},
+			desired: []*DesiredStaticNodePool{
+				desiredA,
+				desiredB, // pool-b exists but with hashB vs old-hash
+			},
+			wantCreate:        []string{"pool-b"},
+			wantDeleteMissing: []string{"pool-c"},
+			wantDeleteUpdate:  []string{"pool-b"},
+		},
+		{
+			name: "Delete Error (Retry)",
+			existing: []NodePoolRef{
+				{
+					Name:   "pool-a",
+					Labels: map[string]string{LabelNodePoolHash: hashA, LabelTPUProvisionerStaticNodepool: "true"},
+					Error:  true,
+				},
+			},
+			desired:         []*DesiredStaticNodePool{desiredA},
+			wantCreate:      []string{"pool-a"},
+			wantDeleteError: []string{"pool-a"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			toCreate, toDeleteMissing, toDeleteUpdate, toDeleteError, err := gke.DiffStaticNodePools(tc.existing, tc.desired)
+			if err != nil {
+				t.Fatalf("DiffStaticNodePools() error = %v", err)
+			}
+
+			var gotCreate []string
+			for _, np := range toCreate {
+				gotCreate = append(gotCreate, np.Name)
+			}
+			sort.Strings(gotCreate)
+			sort.Strings(tc.wantCreate)
+			if diff := cmp.Diff(tc.wantCreate, gotCreate, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("toCreate mismatch (-want +got):\n%s", diff)
+			}
+
+			sort.Strings(toDeleteMissing)
+			sort.Strings(tc.wantDeleteMissing)
+			if diff := cmp.Diff(tc.wantDeleteMissing, toDeleteMissing, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("toDeleteMissing mismatch (-want +got):\n%s", diff)
+			}
+
+			sort.Strings(toDeleteUpdate)
+			sort.Strings(tc.wantDeleteUpdate)
+			if diff := cmp.Diff(tc.wantDeleteUpdate, toDeleteUpdate, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("toDeleteUpdate mismatch (-want +got):\n%s", diff)
+			}
+
+			sort.Strings(toDeleteError)
+			sort.Strings(tc.wantDeleteError)
+			if diff := cmp.Diff(tc.wantDeleteError, toDeleteError, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("toDeleteError mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

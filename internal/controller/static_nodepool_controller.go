@@ -37,6 +37,17 @@ const (
 	ConfigMapName = "tpu-provisioner-static-nodepools-config"
 )
 
+type gscBlock struct {
+	Name           string `yaml:"name"`
+	Subblocks      string `yaml:"subblocks"`
+	NodepoolPrefix string `yaml:"nodepoolPrefix"`
+}
+
+type reservation struct {
+	Name      string     `yaml:"name"`
+	GscBlocks []gscBlock `yaml:"gscBlocks"`
+}
+
 // StaticNodepoolReconciler reconciles static nodepools based on a configmap.
 type StaticNodepoolReconciler struct {
 	client.Client
@@ -67,17 +78,6 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("failed to get configmap %s: %w", req.NamespacedName.String(), err)
 	}
 
-	type gscBlock struct {
-		Name           string `yaml:"name"`
-		Subblocks      string `yaml:"subblocks"`
-		NodepoolPrefix string `yaml:"nodepoolPrefix"`
-	}
-
-	type reservation struct {
-		Name      string     `yaml:"name"`
-		GscBlocks []gscBlock `yaml:"gscBlocks"`
-	}
-
 	reservationsYAML, ok := cm.Data["reservations"]
 	if !ok {
 		lg.Info("No 'reservations' key in configmap. Skipping reconciliation.", "configmap", req.NamespacedName.String())
@@ -103,32 +103,7 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// List nodepools that should exist in the cluster based on the configmap.
-	desiredNodePools, err := func(reservations []reservation) ([]*cloud.DesiredStaticNodePool, error) {
-		var desiredNodePools []*cloud.DesiredStaticNodePool
-
-		for _, reservation := range reservations {
-			for _, gscBlock := range reservation.GscBlocks {
-				start, end, err := cloud.ParseSubBlocks(gscBlock.Subblocks)
-				if err != nil {
-					return nil, fmt.Errorf("parsing subblocks for gscBlock %s: %w", gscBlock.Name, err)
-				}
-
-				for i := start; i <= end; i++ {
-					nodePoolID := utils.SetNodePoolName(gscBlock.NodepoolPrefix, gscBlock.Name, i)
-					subblockName := fmt.Sprintf("%s-subblock-%04d", gscBlock.Name, i)
-					subblockToConsume := fmt.Sprintf("projects/%s/reservations/%s/reservationBlocks/%s/reservationSubBlocks/%s", r.Provider.ProjectID(), reservation.Name, gscBlock.Name, subblockName)
-
-					desiredNodePools = append(desiredNodePools, &cloud.DesiredStaticNodePool{
-						Name:              nodePoolID,
-						SubblockToConsume: subblockToConsume,
-						Config:            &nodepoolConfig,
-					})
-				}
-			}
-		}
-
-		return desiredNodePools, nil
-	}(reservations)
+	desiredNodePools, err := r.constructDesiredNodePools(reservations, &nodepoolConfig)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get desired nodepools from config: %w", err)
 	}
@@ -139,14 +114,30 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("failed to list existing nodepools: %w", err)
 	}
 
-	toCreate, toDelete, err := r.Provider.DiffStaticNodePools(existingNodePools, desiredNodePools)
+	toCreate, toDeleteMissing, toDeleteUpdate, toDeleteError, err := r.Provider.DiffStaticNodePools(existingNodePools, desiredNodePools)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to diff nodepools: %w", err)
 	}
 
-	if len(toDelete) > 0 {
-		lg.Info("Deleting static nodepools not found in config", "nodepools", toDelete)
-		errs := r.Provider.DeleteStaticNodePools(ctx, toDelete, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool not in config")
+	if len(toDeleteMissing) > 0 {
+		lg.Info("Deleting static nodepools not found in config", "nodepools", toDeleteMissing)
+		errs := r.Provider.DeleteStaticNodePools(ctx, toDeleteMissing, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool not in config")
+		if len(errs) > 0 {
+			return ctrl.Result{}, fmt.Errorf("failed to delete some static nodepools: %v", errs)
+		}
+	}
+
+	if len(toDeleteError) > 0 {
+		lg.Info("Deleting static nodepools in ERROR state to retry", "nodepools", toDeleteError)
+		errs := r.Provider.DeleteStaticNodePools(ctx, toDeleteError, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool in error state")
+		if len(errs) > 0 {
+			return ctrl.Result{}, fmt.Errorf("failed to delete some static nodepools: %v", errs)
+		}
+	}
+
+	if len(toDeleteUpdate) > 0 {
+		lg.Info("Deleting static nodepools to recreate (config changed)", "nodepools", toDeleteUpdate)
+		errs := r.Provider.DeleteStaticNodePools(ctx, toDeleteUpdate, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool config changed")
 		if len(errs) > 0 {
 			return ctrl.Result{}, fmt.Errorf("failed to delete some static nodepools: %v", errs)
 		}
@@ -162,6 +153,33 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *StaticNodepoolReconciler) constructDesiredNodePools(reservations []reservation, nodepoolConfig *cloud.StaticNodePoolConfig) ([]*cloud.DesiredStaticNodePool, error) {
+	var desiredNodePools []*cloud.DesiredStaticNodePool
+
+	for _, reservation := range reservations {
+		for _, gscBlock := range reservation.GscBlocks {
+			start, end, err := cloud.ParseSubBlocks(gscBlock.Subblocks)
+			if err != nil {
+				return nil, fmt.Errorf("parsing subblocks for gscBlock %s: %w", gscBlock.Name, err)
+			}
+
+			for i := start; i <= end; i++ {
+				nodePoolID := utils.SetNodePoolName(gscBlock.NodepoolPrefix, gscBlock.Name, i)
+				subblockName := fmt.Sprintf("%s-subblock-%04d", gscBlock.Name, i)
+				subblockToConsume := fmt.Sprintf("projects/%s/reservations/%s/reservationBlocks/%s/reservationSubBlocks/%s", r.Provider.ProjectID(), reservation.Name, gscBlock.Name, subblockName)
+
+				desiredNodePools = append(desiredNodePools, &cloud.DesiredStaticNodePool{
+					Name:              nodePoolID,
+					SubblockToConsume: subblockToConsume,
+					Config:            nodepoolConfig,
+				})
+			}
+		}
+	}
+
+	return desiredNodePools, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

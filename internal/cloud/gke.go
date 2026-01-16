@@ -536,7 +536,7 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 		NetworkConfig:     networkConfig,
 	}
 
-	hash, err := NodePoolHash(np)
+	hash, err := nodePoolHash(np)
 	if err != nil {
 		return nil, fmt.Errorf("hashing node pool: %w", err)
 	}
@@ -691,9 +691,11 @@ func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*container
 	return additionalNodeNetworks, nil
 }
 
-func (g *GKE) DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepools []*DesiredStaticNodePool) ([]*DesiredStaticNodePool, []string, error) {
+func (g *GKE) DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepools []*DesiredStaticNodePool) ([]*DesiredStaticNodePool, []string, []string, []string, error) {
 	var toCreate []*DesiredStaticNodePool
-	var toDelete []string
+	var toDeleteMissing []string
+	var toDeleteUpdate []string
+	var toDeleteError []string
 
 	existingMap := make(map[string]NodePoolRef)
 	for _, np := range existingNodepools {
@@ -709,11 +711,11 @@ func (g *GKE) DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepo
 	for _, desired := range desiredNodepools {
 		desiredNP, err := g.StaticNodePoolForSubBlock(desired.Name, desired.SubblockToConsume, desired.Config)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to build desired nodepool object for %s: %w", desired.Name, err)
+			return nil, nil, nil, nil, fmt.Errorf("failed to build desired nodepool object for %s: %w", desired.Name, err)
 		}
 		desiredHash, ok := desiredNP.Config.Labels[LabelNodePoolHash]
 		if !ok {
-			return nil, nil, fmt.Errorf("missing hash in desired node pool %s", desired.Name)
+			return nil, nil, nil, nil, fmt.Errorf("missing hash in desired node pool %s", desired.Name)
 		}
 
 		existing, ok := existingMap[desired.Name]
@@ -722,11 +724,18 @@ func (g *GKE) DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepo
 			continue
 		}
 
+		// If the existing nodepool is in an ERROR state, we should recreate it regardless of whether the config changed or not.
+		if existing.Error {
+			toDeleteError = append(toDeleteError, desired.Name)
+			toCreate = append(toCreate, desired)
+			continue
+		}
+
 		existingHash, ok := existing.Labels[LabelNodePoolHash]
 		// If existing nodepool has no hash, we assume it's a legacy one and don't touch it unless it is removed from config.
 		// If it's removed from config, it will be caught in the next loop.
 		if ok && existingHash != desiredHash {
-			toDelete = append(toDelete, desired.Name)
+			toDeleteUpdate = append(toDeleteUpdate, desired.Name)
 			toCreate = append(toCreate, desired)
 		}
 	}
@@ -737,11 +746,11 @@ func (g *GKE) DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepo
 			continue
 		}
 		if _, ok := desiredMap[existing.Name]; !ok {
-			toDelete = append(toDelete, existing.Name)
+			toDeleteMissing = append(toDeleteMissing, existing.Name)
 		}
 	}
 
-	return toCreate, toDelete, nil
+	return toCreate, toDeleteMissing, toDeleteUpdate, toDeleteError, nil
 }
 
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
@@ -965,7 +974,7 @@ func (g *GKE) StaticNodePoolForSubBlock(nodePoolID, subblockToConsume string, co
 		NetworkConfig:     networkConfig,
 	}
 
-	hash, err := NodePoolHash(np)
+	hash, err := nodePoolHash(np)
 	if err != nil {
 		return nil, fmt.Errorf("hashing node pool: %w", err)
 	}
@@ -984,7 +993,7 @@ func (g *GKE) StaticNodePoolForSubBlock(nodePoolID, subblockToConsume string, co
 // For STATIC NODEPOOLS, a more comprehensive approach is taken for any parameters that are
 // configurable by the user via the static nodepools configmap, as users will generally want
 // nodepools to be recreated when inputs are changed.
-func NodePoolHash(np *containerv1beta1.NodePool) (string, error) {
+func nodePoolHash(np *containerv1beta1.NodePool) (string, error) {
 	h := fnv.New32a()
 
 	isStatic := np.Config != nil && np.Config.Labels[LabelTPUProvisionerStaticNodepool] == "true"
