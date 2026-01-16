@@ -53,68 +53,6 @@ machineType: "tpu7x"
 		})
 	})
 
-	Context("when a valid static nodepool configmap is deleted", func() {
-		It("should delete the nodepools", func() {
-			ctx := context.Background()
-			cm := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "static-nodepool-config-to-delete",
-					Namespace: testNamespace,
-				},
-				Data: map[string]string{
-					"reservations": `
-- name: "reservation-to-delete"
-  gscBlocks:
-  - name: "gsc-block-to-delete"
-    subblocks: "0001-0002"
-    nodepoolPrefix: "delete-test-nodepool"
-`,
-					"nodepoolConfig": `
-machineType: "tpu7x"
-`,
-				},
-			}
-
-			By("Creating a configmap with static nodepools to be deleted")
-			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
-
-			By("Checking that the nodepools were created")
-			Eventually(func() bool {
-				nodePools, err := provider.ListNodePools()
-				if err != nil {
-					return false
-				}
-				found1 := false
-				found2 := false
-				for _, np := range nodePools {
-					if np.Name == "delete-test-nodepool-0001" {
-						found1 = true
-					}
-					if np.Name == "delete-test-nodepool-0002" {
-						found2 = true
-					}
-				}
-				return found1 && found2
-			}, timeout, interval).Should(BeTrue())
-
-			// Assert that they are not deleted yet
-			_, deleted1 := provider.getDeleted("delete-test-nodepool-0001")
-			Expect(deleted1).To(BeFalse())
-			_, deleted2 := provider.getDeleted("delete-test-nodepool-0002")
-			Expect(deleted2).To(BeFalse())
-
-			By("Deleting the configmap")
-			Expect(k8sClient.Delete(ctx, cm)).To(Succeed())
-
-			By("Checking that the nodepools were deleted")
-			Eventually(func() bool {
-				_, deleted1 := provider.getDeleted("delete-test-nodepool-0001")
-				_, deleted2 := provider.getDeleted("delete-test-nodepool-0002")
-				return deleted1 && deleted2
-			}, timeout, interval).Should(BeTrue())
-		})
-	})
-
 	Context("when a valid static nodepool configmap is updated", func() {
 		It("should update the nodepools", func() {
 			ctx := context.Background()
@@ -196,4 +134,74 @@ machineType: "tpu7x"
 		})
 	})
 
+	Context("when a valid static nodepool configmap is updated with different config", func() {
+		It("should recreate the nodepools", func() {
+			ctx := context.Background()
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "static-nodepool-config-to-recreate",
+					Namespace: testNamespace,
+				},
+				Data: map[string]string{
+					"reservations": `
+- name: "reservation-to-recreate"
+  gscBlocks:
+  - name: "gsc-block-to-recreate"
+    subblocks: "0001"
+    nodepoolPrefix: "recreate-test-nodepool"
+`,
+					"nodepoolConfig": `
+machineType: "tpu-v4"
+`,
+				},
+			}
+
+			By("Creating a configmap with a static nodepool")
+			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+
+			By("Checking that the initial nodepool was created")
+			Eventually(func() bool {
+				nodePools, err := provider.ListNodePools()
+				if err != nil {
+					return false
+				}
+				for _, np := range nodePools {
+					if np.Name == "recreate-test-nodepool-0001" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
+
+			// Update the configmap
+			cm.Data["nodepoolConfig"] = `
+machineType: "tpu-v5"
+`
+			By("Updating the configmap with a new machine type")
+			Expect(k8sClient.Update(ctx, cm)).To(Succeed())
+
+			By("Checking that the nodepool was recreated")
+			Eventually(func() bool {
+				// Check that the old nodepool is deleted
+				_, deleted := provider.getDeleted("recreate-test-nodepool-0001")
+
+				// Check that the new nodepool is created
+				// The mock provider will create a new nodepool with the same name,
+				// but in a real scenario, the old one is deleted and a new one is created.
+				// Our mock provider simulates this by deleting the old one and creating a new one.
+				nodePools, err := provider.ListNodePools()
+				if err != nil {
+					return false
+				}
+				created := false
+				for _, np := range nodePools {
+					if np.Name == "recreate-test-nodepool-0001" {
+						created = true
+					}
+				}
+
+				return deleted && created
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
 })

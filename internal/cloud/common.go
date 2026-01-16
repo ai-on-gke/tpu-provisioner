@@ -60,14 +60,26 @@ type StaticNodePoolConfig struct {
 	PlacementPolicy             string            `yaml:"placementPolicy"`
 }
 
+type DesiredStaticNodePool struct {
+	Name              string
+	ReservationName   string
+	GscBlockName      string
+	NodepoolPrefix    string
+	SubblockIndex     int
+	Config            *StaticNodePoolConfig
+	SubblockToConsume string
+}
+
 type Provider interface {
 	NodePoolLabelKey() string
+	ProjectID() string
 	EnsureNodePoolForPod(*corev1.Pod, string) error
 	DeleteNodePoolForNode(*corev1.Node, string) error
 	DeleteNodePool(string, client.Object, string) error
 	ListNodePools() ([]NodePoolRef, error)
-	EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolPrefix string, subblocks string, config *StaticNodePoolConfig, concurrency int, eventObj client.Object) error
+	EnsureStaticNodePools(ctx context.Context, desiredNodePools []*DesiredStaticNodePool, concurrency int, eventObj client.Object) error
 	DeleteStaticNodePools(ctx context.Context, nodepoolNames []string, concurrency int, eventObj client.Object, why string) []error
+	DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepools []*DesiredStaticNodePool) (toCreate []*DesiredStaticNodePool, toDelete []string, err error)
 }
 
 var ErrDuplicateRequest = errors.New("duplicate request")

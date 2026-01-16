@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,17 +36,6 @@ import (
 const (
 	ConfigMapName = "tpu-provisioner-static-nodepools-config"
 )
-
-type GscBlock struct {
-	Name           string `yaml:"name"`
-	Subblocks      string `yaml:"subblocks"`
-	NodepoolPrefix string `yaml:"nodepoolPrefix"`
-}
-
-type Reservation struct {
-	Name      string     `yaml:"name"`
-	GscBlocks []GscBlock `yaml:"gscBlocks"`
-}
 
 // StaticNodepoolReconciler reconciles static nodepools based on a configmap.
 type StaticNodepoolReconciler struct {
@@ -70,35 +60,22 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var cm corev1.ConfigMap
 	if err := r.Get(ctx, req.NamespacedName, &cm); err != nil {
 		if apierrors.IsNotFound(err) {
-			// If the configmap is not found, the reconciler assumes it was deleted and cleans up all nodepools
-			// in the cluster whose labels indicate that they are static nodepools created by the tpu-provisioner
-			lg.Info("Static nodepools configmap not found. Initiating cleanup of all static nodepools for this cluster.", "configmap", req.NamespacedName.String())
-
-			existingNodePools, listErr := r.Provider.ListNodePools()
-			if listErr != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to list existing nodepools during configmap deletion cleanup: %w", listErr)
-			}
-
-			nodepoolsToDelete := []string{}
-			for _, np := range existingNodePools {
-				// Assumes all existing static nodepools were managed by the now-deleted configmap since
-				// there should only be one static nodepools configmap per cluster.
-				if np.Labels != nil && np.Labels[cloud.LabelTPUProvisionerStaticNodepool] == "true" {
-					nodepoolsToDelete = append(nodepoolsToDelete, np.Name)
-				}
-			}
-
-			if len(nodepoolsToDelete) > 0 {
-				lg.Info("Deleting static nodepools that were previously managed by the deleted configmap", "nodepools", nodepoolsToDelete)
-				// Pass nil for eventObj as the configmap is already deleted.
-				errs := r.Provider.DeleteStaticNodePools(ctx, nodepoolsToDelete, r.StaticNodepoolDeleteConcurrency, nil, "static nodepools configmap deleted")
-				if len(errs) > 0 {
-					return ctrl.Result{}, fmt.Errorf("failed to delete some static nodepools during configmap cleanup: %v", errs)
-				}
-			}
+			// If the configmap is not found, do nothing.
+			lg.Info("Static nodepools configmap not found. Taking no action.", "configmap", req.NamespacedName.String())
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to get configmap %s: %w", req.NamespacedName.String(), err)
+	}
+
+	type gscBlock struct {
+		Name           string `yaml:"name"`
+		Subblocks      string `yaml:"subblocks"`
+		NodepoolPrefix string `yaml:"nodepoolPrefix"`
+	}
+
+	type reservation struct {
+		Name      string     `yaml:"name"`
+		GscBlocks []gscBlock `yaml:"gscBlocks"`
 	}
 
 	reservationsYAML, ok := cm.Data["reservations"]
@@ -107,7 +84,7 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	var reservations []Reservation
+	var reservations []reservation
 	if err := yaml.Unmarshal([]byte(reservationsYAML), &reservations); err != nil {
 		lg.Error(err, "failed to unmarshal reservations from configmap", "configmap", req.NamespacedName.String())
 		return ctrl.Result{}, nil
@@ -126,7 +103,32 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// List nodepools that should exist in the cluster based on the configmap.
-	desiredNodePools, err := getNodePoolsFromConfig(reservations)
+	desiredNodePools, err := func(reservations []reservation) ([]*cloud.DesiredStaticNodePool, error) {
+		var desiredNodePools []*cloud.DesiredStaticNodePool
+
+		for _, reservation := range reservations {
+			for _, gscBlock := range reservation.GscBlocks {
+				start, end, err := cloud.ParseSubBlocks(gscBlock.Subblocks)
+				if err != nil {
+					return nil, fmt.Errorf("parsing subblocks for gscBlock %s: %w", gscBlock.Name, err)
+				}
+
+				for i := start; i <= end; i++ {
+					nodePoolID := utils.SetNodePoolName(gscBlock.NodepoolPrefix, gscBlock.Name, i)
+					subblockName := fmt.Sprintf("%s-subblock-%04d", gscBlock.Name, i)
+					subblockToConsume := fmt.Sprintf("projects/%s/reservations/%s/reservationBlocks/%s/reservationSubBlocks/%s", r.Provider.ProjectID(), reservation.Name, gscBlock.Name, subblockName)
+
+					desiredNodePools = append(desiredNodePools, &cloud.DesiredStaticNodePool{
+						Name:              nodePoolID,
+						SubblockToConsume: subblockToConsume,
+						Config:            &nodepoolConfig,
+					})
+				}
+			}
+		}
+
+		return desiredNodePools, nil
+	}(reservations)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get desired nodepools from config: %w", err)
 	}
@@ -137,70 +139,29 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("failed to list existing nodepools: %w", err)
 	}
 
-	nodepoolsToDelete := []string{}
-	for _, np := range existingNodePools {
-		if np.Labels[cloud.LabelTPUProvisionerStaticNodepool] != "true" {
-			continue
-		}
-		if _, shouldExist := desiredNodePools[np.Name]; !shouldExist {
-			nodepoolsToDelete = append(nodepoolsToDelete, np.Name)
-		}
+	toCreate, toDelete, err := r.Provider.DiffStaticNodePools(existingNodePools, desiredNodePools)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to diff nodepools: %w", err)
 	}
 
-	if len(nodepoolsToDelete) > 0 {
-		lg.Info("Deleting static nodepools not found in config", "nodepools", nodepoolsToDelete)
-		errs := r.Provider.DeleteStaticNodePools(ctx, nodepoolsToDelete, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool not in config")
+	if len(toDelete) > 0 {
+		lg.Info("Deleting static nodepools not found in config", "nodepools", toDelete)
+		errs := r.Provider.DeleteStaticNodePools(ctx, toDelete, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool not in config")
 		if len(errs) > 0 {
 			return ctrl.Result{}, fmt.Errorf("failed to delete some static nodepools: %v", errs)
 		}
 	}
 
-	var allErrors []error
-	for _, reservation := range reservations {
-		for _, gscBlock := range reservation.GscBlocks {
-			if gscBlock.NodepoolPrefix == "" {
-				wrappedErr := fmt.Errorf("nodepoolPrefix cannot be empty for gscBlock: %s", gscBlock.Name)
-				lg.Error(wrappedErr, "error ensuring static nodepool for gscBlock")
-				allErrors = append(allErrors, wrappedErr)
-				continue
-			}
-			lg.Info(fmt.Sprintf("Ensuring static nodepool for gscBlock: %s", gscBlock.Name))
-			createCtx, cancel := context.WithTimeout(ctx, r.StaticNodepoolCreateTimeout)
-			defer cancel()
-			if err := r.Provider.EnsureStaticNodePools(createCtx, reservation.Name, gscBlock.Name, gscBlock.NodepoolPrefix, gscBlock.Subblocks, &nodepoolConfig, r.StaticNodepoolCreateConcurrency, &cm); err != nil {
-				wrappedErr := fmt.Errorf("failed to ensure static nodepool for %s: %w", gscBlock.Name, err)
-				lg.Error(wrappedErr, "error ensuring static nodepool for gscBlock")
-				allErrors = append(allErrors, wrappedErr)
-			}
+	if len(toCreate) > 0 {
+		lg.Info("Creating static nodepools", "nodepools", toCreate)
+		createCtx, cancel := context.WithTimeout(ctx, r.StaticNodepoolCreateTimeout)
+		defer cancel()
+		if err := r.Provider.EnsureStaticNodePools(createCtx, toCreate, r.StaticNodepoolCreateConcurrency, &cm); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to ensure static nodepools: %w", err)
 		}
-	}
-
-	if len(allErrors) > 0 {
-		return ctrl.Result{}, fmt.Errorf("failed to ensure all static nodepools: %v", allErrors)
 	}
 
 	return ctrl.Result{}, nil
-}
-
-func getNodePoolsFromConfig(reservations []Reservation) (map[string]struct{}, error) {
-	nodePools := make(map[string]struct{})
-
-	for _, reservation := range reservations {
-		for _, gscBlock := range reservation.GscBlocks {
-			start, end, err := cloud.ParseSubBlocks(gscBlock.Subblocks)
-			if err != nil {
-				return nil, fmt.Errorf("parsing subblocks for gscBlock %s: %w", gscBlock.Name, err)
-			}
-
-			for i := start; i <= end; i++ {
-				formattedSubblockIndex := fmt.Sprintf("%04d", i)
-				nodePoolID := fmt.Sprintf("%s-%s", gscBlock.NodepoolPrefix, formattedSubblockIndex)
-				nodePools[nodePoolID] = struct{}{}
-			}
-		}
-	}
-
-	return nodePools, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

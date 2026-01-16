@@ -30,8 +30,21 @@ func TestEnsureStaticNodePool(t *testing.T) {
 		Topology:    "4x4x4",
 		NodeCount:   16,
 	}
+
+	desired1 := []*DesiredStaticNodePool{
+		{
+			Name:              "np-name-0001",
+			SubblockToConsume: "projects/test-project/reservations/res-1/reservationBlocks/np-name-block/reservationSubBlocks/np-name-block-subblock-0001",
+			Config:            npNameConfig,
+		},
+		{
+			Name:              "np-name-0002",
+			SubblockToConsume: "projects/test-project/reservations/res-1/reservationBlocks/np-name-block/reservationSubBlocks/np-name-block-subblock-0002",
+			Config:            npNameConfig,
+		},
+	}
 	// This call should create np-name-0001 and np-name-0002
-	if err := gke.EnsureStaticNodePools(ctx, "res-1", "np-name-block", "np-name", "0001-0002", npNameConfig, 1, nil); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, desired1, 1, nil); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["np-name-0001"]; got != 1 {
@@ -68,8 +81,20 @@ func TestEnsureStaticNodePool(t *testing.T) {
 		Topology:    "4x4x4",
 		NodeCount:   16,
 	}
+	desired2 := []*DesiredStaticNodePool{
+		{
+			Name:              "np-prefix-0001",
+			SubblockToConsume: "projects/test-project/reservations/res-2/reservationBlocks/block-name-ignored/reservationSubBlocks/block-name-ignored-subblock-0001",
+			Config:            npPrefixConfig,
+		},
+		{
+			Name:              "np-prefix-0002",
+			SubblockToConsume: "projects/test-project/reservations/res-2/reservationBlocks/block-name-ignored/reservationSubBlocks/block-name-ignored-subblock-0002",
+			Config:            npPrefixConfig,
+		},
+	}
 	// This call should create np-prefix-0001 and np-prefix-0002
-	if err := gke.EnsureStaticNodePools(ctx, "res-2", "block-name-ignored", "np-prefix", "0001-0002", npPrefixConfig, 1, nil); err != nil {
+	if err := gke.EnsureStaticNodePools(ctx, desired2, 1, nil); err != nil {
 		t.Fatalf("EnsureStaticNodePools(): %v", err)
 	}
 	if got := svc.creates["np-prefix-0001"]; got != 1 {
@@ -1293,6 +1318,62 @@ func Test_nodePoolSelectiveHash(t *testing.T) {
 			expSameHash: false,
 		},
 		{
+			name: "different label order for static nodepool",
+			A: &container.NodePool{
+				Config: &container.NodeConfig{
+					MachineType: "tpu7x-standard-4t",
+					Labels: map[string]string{
+						LabelTPUProvisionerStaticNodepool: "true",
+						"a":                               "b",
+						"c":                               "d",
+					},
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{},
+				},
+				PlacementPolicy: &container.PlacementPolicy{},
+			},
+			B: &container.NodePool{
+				Config: &container.NodeConfig{
+					MachineType: "tpu7x-standard-4t",
+					Labels: map[string]string{
+						LabelTPUProvisionerStaticNodepool: "true",
+						"c":                               "d",
+						"a":                               "b",
+					},
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{},
+				},
+				PlacementPolicy: &container.PlacementPolicy{},
+			},
+			expSameHash: true,
+		},
+		{
+			name: "different label order for static nodepool",
+			A: &container.NodePool{
+				Config: &container.NodeConfig{
+					MachineType: "tpu7x-standard-4t",
+					Labels: map[string]string{
+						LabelTPUProvisionerStaticNodepool: "true",
+						"a":                               "b",
+						"c":                               "d",
+					},
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{},
+				},
+				PlacementPolicy: &container.PlacementPolicy{},
+			},
+			B: &container.NodePool{
+				Config: &container.NodeConfig{
+					MachineType: "tpu7x-standard-4t",
+					Labels: map[string]string{
+						LabelTPUProvisionerStaticNodepool: "true",
+						"c":                               "d",
+						"a":                               "b",
+					},
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{},
+				},
+				PlacementPolicy: &container.PlacementPolicy{},
+			},
+			expSameHash: true,
+		},
+		{
 			name: "non hashed upgrade settings",
 			A: &container.NodePool{
 				Config: &container.NodeConfig{
@@ -1320,14 +1401,46 @@ func Test_nodePoolSelectiveHash(t *testing.T) {
 			},
 			expSameHash: true,
 		},
+		{
+			name: "different placement policy for static nodepool",
+			A: &container.NodePool{
+				Config: &container.NodeConfig{
+					MachineType: "tpu7x-standard-4t",
+					Labels: map[string]string{
+						LabelTPUProvisionerStaticNodepool: "true",
+						"a":                               "b",
+						"c":                               "d",
+					},
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{},
+				},
+				PlacementPolicy: &container.PlacementPolicy{
+					PolicyName: "policy-a",
+				},
+			},
+			B: &container.NodePool{
+				Config: &container.NodeConfig{
+					MachineType: "tpu7x-standard-4t",
+					Labels: map[string]string{
+						LabelTPUProvisionerStaticNodepool: "true",
+						"a":                               "b",
+						"c":                               "d",
+					},
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{},
+				},
+				PlacementPolicy: &container.PlacementPolicy{
+					PolicyName: "policy-b",
+				},
+			},
+			expSameHash: false,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			hashA, err := nodePoolSelectiveHash(c.A)
+			hashA, err := NodePoolHash(c.A)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
-			hashB, err := nodePoolSelectiveHash(c.B)
+			hashB, err := NodePoolHash(c.B)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}

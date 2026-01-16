@@ -37,6 +37,7 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
 	//+kubebuilder:scaffold:imports
 )
@@ -45,12 +46,13 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg       *rest.Config
-	k8sClient client.Client
-	testEnv   *envtest.Environment
-	provider  = newMockProvider()
-	ctx       context.Context
-	cancel    context.CancelFunc
+	cfg                      *rest.Config
+	k8sClient                client.Client
+	testEnv                  *envtest.Environment
+	provider                 *mockProvider
+	staticNodepoolReconciler *controller.StaticNodepoolReconciler
+	ctx                      context.Context
+	cancel                   context.CancelFunc
 )
 
 const (
@@ -87,6 +89,9 @@ var _ = BeforeSuite(func() {
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
+
+	gke := &cloud.GKE{}
+	provider = newMockProvider(gke)
 
 	err = jobset.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
@@ -135,14 +140,15 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
-	err = (&controller.StaticNodepoolReconciler{
+	staticNodepoolReconciler = &controller.StaticNodepoolReconciler{
 		Client:                      mgr.GetClient(),
 		Scheme:                      mgr.GetScheme(),
 		Recorder:                    mgr.GetEventRecorderFor("tpu-provisioner-static-nodepool-reconciler"),
 		Provider:                    provider,
 		StaticNodepoolCreateTimeout: staticNodepoolCreateTimeout,
 		Namespace:                   testNamespace,
-	}).SetupWithManager(mgr)
+	}
+	err = staticNodepoolReconciler.SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
 	go func() {
