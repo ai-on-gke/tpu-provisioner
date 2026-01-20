@@ -8,7 +8,6 @@ import (
 	"hash/fnv"
 	"math"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1008,7 +1007,7 @@ func nodePoolHash(np *containerv1beta1.NodePool) (string, error) {
 			MachineType            string
 			ReservationAffinity    *containerv1beta1.ReservationAffinity
 			ShieldedInstanceConfig *containerv1beta1.ShieldedInstanceConfig
-			Labels                 []string
+			Labels                 map[string]string
 		}
 
 		hashData := staticNodepoolHashData{
@@ -1020,18 +1019,15 @@ func nodePoolHash(np *containerv1beta1.NodePool) (string, error) {
 			hashData.MachineType = np.Config.MachineType
 			hashData.ReservationAffinity = np.Config.ReservationAffinity
 			hashData.ShieldedInstanceConfig = np.Config.ShieldedInstanceConfig
-			// Nodepool labels need to be sorted to ensure hash determinism
 			if np.Config.Labels != nil {
-				labels := make([]string, 0, len(np.Config.Labels))
+				hashData.Labels = make(map[string]string, len(np.Config.Labels))
 				for k, v := range np.Config.Labels {
 					// The hash label will change on every hash calculation, so we need to exclude it.
 					if k == LabelNodePoolHash {
 						continue
 					}
-					labels = append(labels, fmt.Sprintf("%s=%s", k, v))
+					hashData.Labels[k] = v
 				}
-				sort.Strings(labels)
-				hashData.Labels = labels
 			}
 		}
 		dataToHash = hashData
