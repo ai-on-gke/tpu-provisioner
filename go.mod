@@ -8,6 +8,7 @@ require (
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/onsi/ginkgo/v2 v2.17.1
 	github.com/onsi/gomega v1.32.0
+	go.uber.org/zap v1.26.0
 	golang.org/x/oauth2 v0.33.0
 	google.golang.org/api v0.257.0
 	gopkg.in/yaml.v2 v2.4.0
@@ -65,7 +66,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.26.0 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f // indirect
 	golang.org/x/net v0.47.0 // indirect

@@ -99,7 +99,7 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	if isStaticNodePool(nodePoolName) {
+	if isStaticNodePool(node.GetLabels()) {
 		// lg.Info("Skipping deletion of static node pool", "nodePoolName", nodePoolName)
 		return ctrl.Result{}, nil
 	}

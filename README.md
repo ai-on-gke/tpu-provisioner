@@ -205,8 +205,8 @@ data:
     - name: "test-reservation"
       gscBlocks:
         - name: "test-reservation-block-0001"
-          numSubblocks: 1
-          nodepoolSuffix: "my-static-nodepool"
+          subblocks: "0001-0002" # Can be a range, e.g. 0001-0002, or a single subblock, e.g. 0001
+          nodepoolPrefix: "my-static-nodepool" # Optional
   nodepoolConfig: |
     machineType: "tpu7x-standard-4t"
     accelerator: "tpu7x"
@@ -226,7 +226,7 @@ The `ConfigMap` has two main keys: `reservations` and `nodepoolConfig`.
 
 ##### `reservations`
 
-This key contains a list of TPU reservations. Each reservation has a `name` and a list of `gscBlocks`. Each `gscBlock` has a `name`, the `numSubblocks` to provision within that block, and the `nodepoolSuffix` which will be used as the suffix for the nodepool name (prepended with `static-`).
+This key contains a list of TPU reservations. Each reservation has a `name` and a list of `gscBlocks`. Each `gscBlock` has a `name`, the `subblocks` to provision within that block, and an optional `nodepoolPrefix`. If provided, it will be used as the prefix for the nodepool name. If not provided, the nodepool name will be equal to the subblock name, which is derived from the reservation and block names, as well as the subblock index.
 
 ##### `nodepoolConfig`
 
@@ -255,3 +255,5 @@ GCP_NODE_ADDITIONAL_NETWORKS: test-network:test-subnet
 GCP_NODE_TAGS: test-tag
 GCP_NODE_SERVICE_ACCOUNT: my-service-account-email
 ```
+
+Nodepools created by the static provisioner are labeled with `tpu-provisioner-static-nodepool` in order to ensure that their lifecycle is managed independently of dynamic nodepools. Nodepools with this label are omitted from the standard garbage collection loop used for dynamically-provisioned nodepools, and are instead cleaned up when their corresponding subblock, block, or reservation specifications are removed from the configmap.

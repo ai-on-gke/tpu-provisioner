@@ -63,7 +63,6 @@ const (
 	maxPodsPerNode = 15
 
 	// Constants for node pool naming conventions.
-	StaticNodepoolPrefix  = "static-"
 	maxJobSetPrefixLength = 34
 	jobKeySuffixLength    = 5
 )
@@ -81,6 +80,8 @@ type GKE struct {
 }
 
 func (g *GKE) NodePoolLabelKey() string { return GKENodePoolNameLabel }
+
+func (g *GKE) ProjectID() string { return g.ClusterContext.ProjectID }
 
 func (g *GKE) EnsureNodePoolForPod(p *corev1.Pod, why string) error {
 	np, err := g.nodePoolForPod(p)
@@ -175,16 +176,23 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 
 	for _, np := range resp.NodePools {
 		var createdForJobSet types.NamespacedName
-		jsName, exists := np.Config.Labels[LabelJobSetName]
-		if exists {
-			jsNamespace, exists := np.Config.Labels[LabelJobSetNamespace]
-			if !exists {
-				jsNamespace = "default"
+		if np.Config != nil && np.Config.Labels != nil {
+			jsName, exists := np.Config.Labels[LabelJobSetName]
+			if exists {
+				jsNamespace, exists := np.Config.Labels[LabelJobSetNamespace]
+				if !exists {
+					jsNamespace = "default"
+				}
+				createdForJobSet = types.NamespacedName{
+					Name:      jsName,
+					Namespace: jsNamespace,
+				}
 			}
-			createdForJobSet = types.NamespacedName{
-				Name:      jsName,
-				Namespace: jsNamespace,
-			}
+		}
+
+		var labels map[string]string
+		if np.Config != nil {
+			labels = np.Config.Labels
 		}
 
 		refs = append(refs, NodePoolRef{
@@ -192,6 +200,7 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 			Error:            np.Status == "ERROR",
 			Message:          np.StatusMessage,
 			CreatedForJobSet: createdForJobSet,
+			Labels:           labels,
 		})
 	}
 
@@ -526,7 +535,7 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 		NetworkConfig:     networkConfig,
 	}
 
-	hash, err := nodePoolSelectiveHash(np)
+	hash, err := nodePoolHash(np)
 	if err != nil {
 		return nil, fmt.Errorf("hashing node pool: %w", err)
 	}
@@ -681,25 +690,85 @@ func parseAdditionalNodeNetworks(additionalNodeNetworksCSV string) ([]*container
 	return additionalNodeNetworks, nil
 }
 
+func (g *GKE) DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepools []*DesiredStaticNodePool) ([]*DesiredStaticNodePool, []string, []string, []string, error) {
+	var toCreate []*DesiredStaticNodePool
+	var toDeleteMissing []string
+	var toDeleteUpdate []string
+	var toDeleteError []string
+
+	existingMap := make(map[string]NodePoolRef)
+	for _, np := range existingNodepools {
+		existingMap[np.Name] = np
+	}
+
+	desiredMap := make(map[string]*DesiredStaticNodePool)
+	for _, np := range desiredNodepools {
+		desiredMap[np.Name] = np
+	}
+
+	// Find nodepools to create or update.
+	for _, desired := range desiredNodepools {
+		desiredNP, err := g.StaticNodePoolForSubBlock(desired.Name, desired.SubblockToConsume, desired.Config)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("failed to build desired nodepool object for %s: %w", desired.Name, err)
+		}
+		desiredHash, ok := desiredNP.Config.Labels[LabelNodePoolHash]
+		if !ok {
+			return nil, nil, nil, nil, fmt.Errorf("missing hash in desired node pool %s", desired.Name)
+		}
+
+		existing, ok := existingMap[desired.Name]
+		if !ok {
+			toCreate = append(toCreate, desired)
+			continue
+		}
+
+		// If the existing nodepool is in an ERROR state, we should recreate it regardless of whether the config changed or not.
+		if existing.Error {
+			toDeleteError = append(toDeleteError, desired.Name)
+			toCreate = append(toCreate, desired)
+			continue
+		}
+
+		existingHash, ok := existing.Labels[LabelNodePoolHash]
+		// If existing nodepool has no hash, we assume it's a legacy one and don't touch it unless it is removed from config.
+		// If it's removed from config, it will be caught in the next loop.
+		if ok && existingHash != desiredHash {
+			toDeleteUpdate = append(toDeleteUpdate, desired.Name)
+			toCreate = append(toCreate, desired)
+		}
+	}
+
+	// Find nodepools to delete.
+	for _, existing := range existingNodepools {
+		if existing.Labels[LabelTPUProvisionerStaticNodepool] != "true" {
+			continue
+		}
+		if _, ok := desiredMap[existing.Name]; !ok {
+			toDeleteMissing = append(toDeleteMissing, existing.Name)
+		}
+	}
+
+	return toCreate, toDeleteMissing, toDeleteUpdate, toDeleteError, nil
+}
+
 // EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockName, nodepoolSuffix string, numSubblocks int, config *StaticNodePoolConfig, concurrency int) error {
-	log.Info("Ensuring static nodepools for reservation", "reservationName", reservationName, "blockName", blockName)
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, desiredNodePools []*DesiredStaticNodePool, concurrency int, eventObj client.Object) error {
+	log.Info("Ensuring static nodepools", "count", len(desiredNodePools))
 
 	var wg sync.WaitGroup
-	errs := make(chan error, numSubblocks)
+	errs := make(chan error, len(desiredNodePools))
 	sem := make(chan struct{}, concurrency)
 
-	for i := 0; i < numSubblocks; i++ {
+	for _, desired := range desiredNodePools {
 		wg.Add(1)
 		sem <- struct{}{}
 
-		go func(i int) {
+		go func(desired *DesiredStaticNodePool) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			nodePoolID := fmt.Sprintf("%s-%d", nodepoolSuffix, i)
-			reservationToConsume := fmt.Sprintf("%s/reservationBlocks/%s", reservationName, blockName)
-			np, err := g.nodePoolForStaticReservation(nodePoolID, reservationToConsume, config)
+			np, err := g.StaticNodePoolForSubBlock(desired.Name, desired.SubblockToConsume, desired.Config)
 			if err != nil {
 				errs <- fmt.Errorf("determining node pool for static reservation: %w", err)
 				return
@@ -722,21 +791,25 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockN
 				}
 
 				log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
+				g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationStarted, "Starting creation of static Node Pool %s", np.Name)
 				if err := g.NodePools.Create(ctx, req, OpCallbacks{
 					ReqFailure: func(err error) {
 						log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
+						g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Request to create Node Pool %s failed: %v.", np.Name, err)
 					},
 					OpFailure: func(err error) {
 						log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
+						g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Operation to create Node Pool %s failed: %v.", np.Name, err)
 					},
 					Success: func() {
 						log.Info("successfully created static node pool", "nodePoolName", np.Name)
+						g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationSucceeded, "Successfully created Node Pool %s.", np.Name)
 					},
 				}); err != nil {
 					errs <- err
 				}
 			}
-		}(i)
+		}(desired)
 	}
 
 	log.Info("Waiting for all goroutines to finish ensuring static nodepools.")
@@ -755,10 +828,41 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, reservationName, blockN
 	return nil
 }
 
-func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume string, config *StaticNodePoolConfig) (*containerv1beta1.NodePool, error) {
+// ParseSubBlocks parses a string of the form "startSubBlockIndex-endSubBlockIndex" or "startSubBlockIndex" into integers.
+func ParseSubBlocks(subblocks string) (int, int, error) {
+	if !strings.Contains(subblocks, "-") {
+		start, err := strconv.Atoi(subblocks)
+		if err != nil {
+			return 0, 0, fmt.Errorf("invalid subblock: %s. expected an integer", subblocks)
+		}
+		return start, start, nil
+	}
+
+	parts := strings.Split(subblocks, "-")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid subblocks format: %s. expected format is start-end", subblocks)
+	}
+	start, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid start subblock: %s. expected an integer", parts[0])
+	}
+	end, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid end subblock: %s. expected an integer", parts[1])
+	}
+
+	if start > end {
+		return 0, 0, fmt.Errorf("start subblock %d cannot be greater than end subblock %d", start, end)
+	}
+
+	return start, end, nil
+}
+
+func (g *GKE) StaticNodePoolForSubBlock(nodePoolID, subblockToConsume string, config *StaticNodePoolConfig) (*containerv1beta1.NodePool, error) {
 	labels := map[string]string{
-		LabelNodepoolManager:       LabelNodepoolManagerTPUPodinator,
-		LabelProvisionerNodepoolID: nodePoolID,
+		LabelNodepoolManager:              LabelNodepoolManagerTPUPodinator,
+		LabelProvisionerNodepoolID:        nodePoolID,
+		LabelTPUProvisionerStaticNodepool: "true",
 	}
 	for k, v := range config.NodeLabels {
 		labels[k] = v
@@ -768,7 +872,7 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 		ConsumeReservationType: "SPECIFIC_RESERVATION",
 		Key:                    "compute.googleapis.com/reservation-name",
 		Values: []string{
-			reservationToConsume,
+			subblockToConsume,
 		},
 	}
 
@@ -810,9 +914,7 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 	}
 
 	// Nodepool name must be <= 40 characters.
-	// 'static-' prefix in nodepool name is used to exclude static nodepools from the garbage collection loop
-	// used for nodepools that are dynamically provisioned based on workload requirements
-	name := fmt.Sprintf(StaticNodepoolPrefix+"%s", nodePoolID)
+	name := nodePoolID
 	if len(name) > 40 {
 		return nil, fmt.Errorf("generated nodepool name %q is longer than 40 characters. Please specify a custom suffix for the nodepool name in the tpu-provisioner-static-nodepools-config configmap that meets the length requirements", name)
 	}
@@ -871,7 +973,7 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 		NetworkConfig:     networkConfig,
 	}
 
-	hash, err := nodePoolSelectiveHash(np)
+	hash, err := nodePoolHash(np)
 	if err != nil {
 		return nil, fmt.Errorf("hashing node pool: %w", err)
 	}
@@ -879,34 +981,115 @@ func (g *GKE) nodePoolForStaticReservation(nodePoolID, reservationToConsume stri
 	return np, nil
 }
 
-// nodePoolSelectiveHash attempts to hash information specific to workload requirements.
-// A selective approach is taken to avoid overzealous node pool recreation under circumstances
-// where values might change due to a config or code change in the provisioner.
+// NodePoolHash attempts to hash information specific to workload requirements.
+// For DYNAMIC NODEPOOLS, a selective approach is taken to avoid overzealous node pool recreation
+// under circumstances where values might change due to a config or code change in the provisioner.
 // Example scenario where selective hashing is useful:
 // 1. Provisioner is updated to include new upgrade settings.
 // 2. Some node pool goes into a repairing state.
 // 3. The workload Pod goes into an unschedulable state.
 // 4. The code path for ensuring a matching node pool exists is executed.
-func nodePoolSelectiveHash(np *containerv1beta1.NodePool) (string, error) {
+// For STATIC NODEPOOLS, a more comprehensive approach is taken for any parameters that are
+// configurable by the user via the static nodepools configmap, as users will generally want
+// nodepools to be recreated when inputs are changed.
+func nodePoolHash(np *containerv1beta1.NodePool) (string, error) {
 	h := fnv.New32a()
-	if np.Config != nil && np.Config.Labels != nil {
-		hash, ok := np.Config.Labels[LabelNodePoolHash]
-		if ok {
-			return hash, nil
+
+	isStatic := np.Config != nil && np.Config.Labels[LabelTPUProvisionerStaticNodepool] == "true"
+
+	var dataToHash any
+	if isStatic {
+		// For static nodepools, we hash all the fields from the configmap.
+		type staticNodepoolHashData struct {
+			PlacementPolicy        *containerv1beta1.PlacementPolicy
+			InitialNodeCount       int64
+			MaxPodsConstraint      *containerv1beta1.MaxPodsConstraint
+			MachineType            string
+			ReservationAffinity    *containerv1beta1.ReservationAffinity
+			ShieldedInstanceConfig *containerv1beta1.ShieldedInstanceConfig
+			Labels                 map[string]string
 		}
+
+		hashData := staticNodepoolHashData{
+			PlacementPolicy:   np.PlacementPolicy,
+			InitialNodeCount:  np.InitialNodeCount,
+			MaxPodsConstraint: np.MaxPodsConstraint,
+		}
+		if np.Config != nil {
+			hashData.MachineType = np.Config.MachineType
+			hashData.ReservationAffinity = np.Config.ReservationAffinity
+			hashData.ShieldedInstanceConfig = np.Config.ShieldedInstanceConfig
+			if np.Config.Labels != nil {
+				hashData.Labels = make(map[string]string, len(np.Config.Labels))
+				for k, v := range np.Config.Labels {
+					// The hash label will change on every hash calculation, so we need to exclude it.
+					if k == LabelNodePoolHash {
+						continue
+					}
+					hashData.Labels[k] = v
+				}
+			}
+		}
+		dataToHash = hashData
+	} else {
+		// For dynamic nodepools, we use a selective hash.
+		npToHash := &containerv1beta1.NodePool{
+			Config: &containerv1beta1.NodeConfig{
+				Spot:                np.Config.Spot,
+				Labels:              np.Config.Labels,
+				MachineType:         np.Config.MachineType,
+				ReservationAffinity: np.Config.ReservationAffinity,
+			},
+		}
+		dataToHash = npToHash
 	}
-	npToHash := &containerv1beta1.NodePool{
-		Config: &containerv1beta1.NodeConfig{
-			Spot:                np.Config.Spot,
-			Labels:              np.Config.Labels,
-			MachineType:         np.Config.MachineType,
-			ReservationAffinity: np.Config.ReservationAffinity,
-		},
-	}
-	jsn, err := json.Marshal(npToHash)
+
+	jsn, err := json.Marshal(dataToHash)
 	if err != nil {
 		return "", err
 	}
 	h.Write(jsn)
 	return rand.SafeEncodeString(fmt.Sprint(h.Sum32())), nil
+}
+
+// DeleteStaticNodePools deletes a list of nodepools concurrently.
+func (g *GKE) DeleteStaticNodePools(ctx context.Context, nodepoolNames []string, concurrency int, eventObj client.Object, why string) []error {
+	lg := logf.FromContext(ctx)
+
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	if len(nodepoolNames) < concurrency {
+		concurrency = len(nodepoolNames)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, len(nodepoolNames))
+	sem := make(chan struct{}, concurrency)
+
+	for _, name := range nodepoolNames {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(npName string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			lg.Info("Deleting static nodepool", "nodepool", npName)
+			if err := g.DeleteNodePool(npName, eventObj, why); err != nil {
+				errs <- fmt.Errorf("failed to delete nodepool %s: %w", npName, err)
+			}
+		}(name)
+	}
+
+	lg.Info("Waiting for all goroutines to finish deleting static nodepools.")
+	wg.Wait()
+	close(errs)
+
+	var allErrors []error
+	for err := range errs {
+		allErrors = append(allErrors, err)
+	}
+
+	return allErrors
 }
