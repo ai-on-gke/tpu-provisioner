@@ -21,16 +21,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
@@ -62,6 +66,7 @@ type StaticNodepoolReconciler struct {
 }
 
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups="accelerator.gke.io",resources=slices,verbs=get;list;watch
 
 func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	lg := ctrllog.FromContext(ctx)
@@ -119,6 +124,98 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("failed to diff nodepools: %w", err)
 	}
 
+	// Track skipped deletes/recreates when nodepool is in use by a slice
+	var skippedCapacity map[string]bool
+	skippedUpdates := make(map[string]bool)
+
+	if len(toDeleteMissing) > 0 || len(toDeleteUpdate) > 0 {
+		// Get all partitions currently used by Slices
+		usedPartitions, err := r.getUsedPartitions(ctx)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting used partitions: %w", err)
+		}
+
+		// Get partition IDs from Nodes
+		nodepoolPartitionIDs, err := r.getNodePartitionIDs(ctx)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting node partition IDs: %w", err)
+		}
+
+		existingMap := make(map[string]cloud.NodePoolRef)
+		for _, np := range existingNodePools {
+			existingMap[np.Name] = np
+		}
+
+		// Check if a specific nodepool is in use.
+		isNodepoolInUse := func(npName string) bool {
+			// Match by Subblock Names (Subblock paths)
+			np, ok := existingMap[npName]
+			if !ok {
+				return false
+			}
+			for _, val := range np.SubblockNames {
+				if usedPartitions[val] {
+					return true
+				}
+			}
+
+			// Match by Partition IDs found on Nodes (UUIDs)
+			if ids, ok := nodepoolPartitionIDs[npName]; ok {
+				for id := range ids {
+					if usedPartitions[id] {
+						return true
+					}
+				}
+			}
+
+			return false
+		}
+
+		// Filter out toDelete nodepools that are locked by a Slice.
+		filterLocked := func(pools []string, actionName string, trackSkippedUpdates bool) []string {
+			var filtered []string
+			for _, name := range pools {
+				if isNodepoolInUse(name) {
+					lg.Info("Skipping "+actionName+" of static nodepool because it is in use by a Slice", "nodepool", name)
+					if trackSkippedUpdates {
+						skippedUpdates[name] = true
+					}
+					if np, ok := existingMap[name]; ok {
+						for _, val := range np.SubblockNames {
+							skippedCapacity[val] = true
+						}
+					}
+					continue
+				}
+				filtered = append(filtered, name)
+			}
+			return filtered
+		}
+
+		skippedCapacity = make(map[string]bool)
+		toDeleteMissing = filterLocked(toDeleteMissing, "deletion", false)
+		toDeleteUpdate = filterLocked(toDeleteUpdate, "recreation (update)", true)
+	}
+
+	// Filter toCreate
+	if len(toCreate) > 0 {
+		var filteredCreate []*cloud.DesiredStaticNodePool
+		for _, desired := range toCreate {
+			// If a nodepool update was skipped, we must also skip the corresponding creation.
+			if skippedUpdates[desired.Name] {
+				lg.Info("Skipping creation of static nodepool because deletion of existing version was skipped (in use)", "nodepool", desired.Name)
+				continue
+			}
+			// If the target capacity is held by ANY skipped nodepool (even if named differently), we must skip creation.
+			if skippedCapacity != nil && skippedCapacity[desired.SubblockToConsume] {
+				lg.Info("Skipping creation of static nodepool because the target capacity is held by an existing nodepool that cannot be deleted (in use)", "nodepool", desired.Name, "subblock", desired.SubblockToConsume)
+				continue
+			}
+			filteredCreate = append(filteredCreate, desired)
+		}
+		toCreate = filteredCreate
+	}
+
 	if len(toDeleteMissing) > 0 {
 		lg.Info("Deleting static nodepools not found in config", "nodepools", toDeleteMissing)
 		errs := r.Provider.DeleteStaticNodePools(ctx, toDeleteMissing, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool not in config")
@@ -155,6 +252,48 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, nil
 }
 
+func (r *StaticNodepoolReconciler) getUsedPartitions(ctx context.Context) (map[string]bool, error) {
+	var sliceList v1beta1.SliceList
+	if err := r.List(ctx, &sliceList); err != nil {
+		return nil, fmt.Errorf("listing slices: %w", err)
+	}
+
+	usedPartitions := make(map[string]bool)
+	for _, slice := range sliceList.Items {
+		for _, p := range slice.Spec.PartitionIds {
+			usedPartitions[p] = true
+		}
+	}
+	return usedPartitions, nil
+}
+
+func (r *StaticNodepoolReconciler) getNodePartitionIDs(ctx context.Context) (map[string]map[string]bool, error) {
+	// List all nodes to find partition IDs (UUIDs) associated with nodepools.
+	var nodeList corev1.NodeList
+	if err := r.List(ctx, &nodeList, client.MatchingLabels{cloud.LabelTPUProvisionerStaticNodepool: "true"}); err != nil {
+		return nil, fmt.Errorf("listing nodes: %w", err)
+	}
+
+	// Map NodePool Name -> Set of Partition IDs (UUIDs) found on its nodes
+	nodepoolPartitionIDs := make(map[string]map[string]bool)
+	for _, node := range nodeList.Items {
+		npName, ok := node.Labels[cloud.GKENodePoolNameLabel]
+		if !ok {
+			continue
+		}
+		if _, ok := nodepoolPartitionIDs[npName]; !ok {
+			nodepoolPartitionIDs[npName] = make(map[string]bool)
+		}
+		for k, v := range node.Labels {
+			// Check for labels like "cloud.google.com/gke-tpu-partition-*-id"
+			if utils.IsPartitionIDLabel(k) {
+				nodepoolPartitionIDs[npName][v] = true
+			}
+		}
+	}
+	return nodepoolPartitionIDs, nil
+}
+
 func (r *StaticNodepoolReconciler) constructDesiredNodePools(reservations []reservation, nodepoolConfig *cloud.StaticNodePoolConfig) ([]*cloud.DesiredStaticNodePool, error) {
 	var desiredNodePools []*cloud.DesiredStaticNodePool
 
@@ -186,5 +325,18 @@ func (r *StaticNodepoolReconciler) constructDesiredNodePools(reservations []rese
 func (r *StaticNodepoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}).
+		Watches(
+			&v1beta1.Slice{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+				return []reconcile.Request{
+					{
+						NamespacedName: types.NamespacedName{
+							Name:      ConfigMapName,
+							Namespace: r.Namespace,
+						},
+					},
+				}
+			}),
+		).
 		Complete(r)
 }

@@ -2,6 +2,7 @@ package controllertest
 
 import (
 	"context"
+	"fmt" // Added for injected failure
 	"sync"
 	"time"
 
@@ -21,6 +22,9 @@ type mockProvider struct {
 	staticNodepoolsCreated map[string]cloud.NodePoolRef
 	ensureCalls            int
 	deleteCalls            int
+	// Test hooks
+	errorStates       map[string]bool
+	failuresRemaining int
 }
 
 func newMockProvider(gke *cloud.GKE) *mockProvider {
@@ -29,6 +33,7 @@ func newMockProvider(gke *cloud.GKE) *mockProvider {
 		created:                make(map[types.NamespacedName]bool),
 		deleted:                make(map[string]time.Time),
 		staticNodepoolsCreated: make(map[string]cloud.NodePoolRef),
+		errorStates:            make(map[string]bool),
 	}
 }
 
@@ -69,6 +74,11 @@ func (p *mockProvider) DiffStaticNodePools(existingNodepools []cloud.NodePoolRef
 func (p *mockProvider) EnsureStaticNodePools(ctx context.Context, desiredNodePools []*cloud.DesiredStaticNodePool, concurrency int, _ client.Object) error {
 	p.Lock()
 	p.ensureCalls++
+	if p.failuresRemaining > 0 {
+		p.failuresRemaining--
+		p.Unlock()
+		return fmt.Errorf("injected failure")
+	}
 	p.Unlock()
 
 	for _, desired := range desiredNodePools {
@@ -79,9 +89,14 @@ func (p *mockProvider) EnsureStaticNodePools(ctx context.Context, desiredNodePoo
 
 		p.Lock()
 		p.staticNodepoolsCreated[desired.Name] = cloud.NodePoolRef{
-			Name:   desired.Name,
-			Labels: np.Config.Labels,
+			Name:          desired.Name,
+			Labels:        np.Config.Labels,
+			SubblockNames: np.Config.ReservationAffinity.Values,
 		}
+		// If it was in error, fixing it clears the error?
+		// For the test, we might want manual clearing or auto-clearing.
+		// Let's assume a successful Ensure clears the error state (recreated).
+		delete(p.errorStates, desired.Name)
 		p.Unlock()
 	}
 	return nil
@@ -113,6 +128,10 @@ func (p *mockProvider) ListNodePools() ([]cloud.NodePoolRef, error) {
 	defer p.Unlock()
 	var refs []cloud.NodePoolRef
 	for _, ref := range p.staticNodepoolsCreated {
+		if p.errorStates[ref.Name] {
+			ref.Error = true
+			ref.Message = "Simulated Error"
+		}
 		refs = append(refs, ref)
 	}
 	return refs, nil
@@ -125,6 +144,7 @@ func (p *mockProvider) DeleteNodePool(name string, eventObj client.Object, why s
 		p.deleted[name] = time.Now()
 	}
 	delete(p.staticNodepoolsCreated, name)
+	delete(p.errorStates, name) // Clear error state on delete
 	return nil
 }
 
@@ -133,4 +153,22 @@ func (p *mockProvider) getDeleted(name string) (time.Time, bool) {
 	defer p.Unlock()
 	timestamp, exists := p.deleted[name]
 	return timestamp, exists
+}
+
+// SetErrorState allows simulating a nodepool in ERROR state
+func (p *mockProvider) SetErrorState(name string, isError bool) {
+	p.Lock()
+	defer p.Unlock()
+	if isError {
+		p.errorStates[name] = true
+	} else {
+		delete(p.errorStates, name)
+	}
+}
+
+// InjectFailure causes EnsureStaticNodePools to return an error for N calls
+func (p *mockProvider) InjectFailure(count int) {
+	p.Lock()
+	defer p.Unlock()
+	p.failuresRemaining = count
 }

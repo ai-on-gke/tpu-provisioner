@@ -65,6 +65,14 @@ rules:
   - patch
   - update
 - apiGroups:
+  - accelerator.gke.io
+  resources:
+  - slices
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - jobset.x-k8s.io
   resources:
   - jobsets
