@@ -982,10 +982,9 @@ func TestDiffSlices(t *testing.T) {
 					partitions: []string{"cube-1", "cube-2"},
 					conditions: []metav1.Condition{
 						{
-							Type:    v1beta1.SliceStateConditionType,
-							Status:  metav1.ConditionUnknown,
-							Reason:  "ProvisioningTimeout",
-							Message: "Wait timeout",
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionUnknown,
+							Reason: "ProvisioningTimeout",
 						},
 					},
 				}),
