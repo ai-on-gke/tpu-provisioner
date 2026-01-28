@@ -772,59 +772,187 @@ func TestParseSliceSelection(t *testing.T) {
 
 func TestDiffSlices(t *testing.T) {
 	tests := []struct {
-		name         string
-		desired      []v1beta1.Slice
-		existing     []v1beta1.Slice
-		wantToDelete []v1beta1.Slice
-		wantToCreate []v1beta1.Slice
+		name                     string
+		desired                  []v1beta1.Slice
+		existing                 []v1beta1.Slice
+		recreateConditionReasons []string
+		wantToDelete             []v1beta1.Slice
+		wantToCreate             []v1beta1.Slice
 	}{
 		{
 			name: "create new slices when none exist",
 			desired: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+				makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}),
 			},
-			existing:     []v1beta1.Slice{},
-			wantToDelete: nil,
+			existing:                 []v1beta1.Slice{},
+			recreateConditionReasons: nil,
+			wantToDelete:             nil,
 			wantToCreate: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+				makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}),
 			},
 		},
 		{
 			name: "delete slices with changed NodeSelector without creating replacements",
 			desired: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-5", "cube-6"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-7", "cube-8"),
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-5", "cube-6"}}),
+				makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-7", "cube-8"}}),
 			},
 			existing: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+				makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}),
 			},
+			recreateConditionReasons: nil,
 			wantToDelete: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+				makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}),
 			},
 			wantToCreate: nil,
 		},
 		{
 			name: "no changes when NodeSelectors match",
 			desired: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+				makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}),
 			},
 			existing: []v1beta1.Slice{
-				makeSliceWithAccel("slice-1", "tpu-v7x", "4x4x8", "cube-1", "cube-2"),
-				makeSliceWithAccel("slice-2", "tpu-v7x", "4x4x8", "cube-3", "cube-4"),
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+				makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}),
 			},
-			wantToDelete: nil,
+			recreateConditionReasons: nil,
+			wantToDelete:             nil,
+			wantToCreate:             nil,
+		},
+		{
+			name: "recreate slice when Ready condition matches reason",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  "tpu-v7x",
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionFalse,
+							Reason: "FailedToProvision",
+						},
+					},
+				}),
+			},
+			recreateConditionReasons: []string{"FailedToProvision"},
+			wantToDelete: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  "tpu-v7x",
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionFalse,
+							Reason: "FailedToProvision",
+						},
+					},
+				}),
+			},
 			wantToCreate: nil,
+		},
+		{
+			name: "do not recreate slice when Ready condition reason does not match",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  "tpu-v7x",
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionFalse,
+							Reason: "SomeOtherReason",
+						},
+					},
+				}),
+			},
+			recreateConditionReasons: []string{"FailedToProvision"},
+			wantToDelete:             nil,
+			wantToCreate:             nil,
+		},
+		{
+			name: "recreate slice when Ready condition is Unknown and matches reason",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  "tpu-v7x",
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionUnknown,
+							Reason: "ProvisioningTimeout",
+						},
+					},
+				}),
+			},
+			recreateConditionReasons: []string{"FailedToProvision", "ProvisioningTimeout"},
+			wantToDelete: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  "tpu-v7x",
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionUnknown,
+							Reason: "ProvisioningTimeout",
+						},
+					},
+				}),
+			},
+			wantToCreate: nil,
+		},
+		{
+			name: "do not recreate slice when reason matches but Ready is True",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  "tpu-v7x",
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionTrue,
+							Reason: "FailedToProvision", // Reason matches but Status is True
+						},
+					},
+				}),
+			},
+			recreateConditionReasons: []string{"FailedToProvision"},
+			wantToDelete:             nil,
+			wantToCreate:             nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotToDelete, gotToCreate := diffSlices(tt.desired, tt.existing)
+			gotToDelete, gotToCreate := diffSlices(tt.desired, tt.existing, tt.recreateConditionReasons)
 			if diff := cmp.Diff(tt.wantToDelete, gotToDelete); diff != "" {
 				t.Errorf("diffSlices() toDelete mismatch (-want +got):\n%s", diff)
 			}
@@ -835,14 +963,29 @@ func TestDiffSlices(t *testing.T) {
 	}
 }
 
+type sliceOptions struct {
+	name       string
+	accelType  string
+	topology   string
+	partitions []string
+	conditions []metav1.Condition
+}
+
 // Helper function to create a Slice object for testing
 func makeSlice(name, topology string, cubes ...string) v1beta1.Slice {
-	return makeSliceWithAccel(name, tpu7xAccelerator, topology, cubes...)
+	return makeSliceWithAccel(sliceOptions{
+		name:       name,
+		accelType:  tpu7xAccelerator,
+		topology:   topology,
+		partitions: cubes,
+	})
 }
 
 // Helper function to create a Slice object with custom accelerator type
-func makeSliceWithAccel(name, accelType, topology string, cubes ...string) v1beta1.Slice {
-	return makeSliceWithJobSet(name, accelType, topology, "test-jobset", "default", cubes...)
+func makeSliceWithAccel(opts sliceOptions) v1beta1.Slice {
+	s := makeSliceWithJobSet(opts.name, opts.accelType, opts.topology, "test-jobset", "default", opts.partitions...)
+	s.Status.Conditions = opts.conditions
+	return s
 }
 
 // Helper function to create a Slice object with custom JobSet name and namespace

@@ -118,6 +118,8 @@ func main() {
 		StaticNodepoolDeleteConcurrency int           `envconfig:"STATIC_NODEPOOL_DELETE_CONCURRENCY" default:"3"`
 
 		PodNamespace string `envconfig:"POD_NAMESPACE"`
+
+		SliceRecreateConditionReasons []string `envconfig:"SLICE_RECREATE_CONDITION_REASONS"`
 	}
 	envconfig.MustProcess("", &cfg)
 
@@ -273,9 +275,10 @@ func main() {
 
 	if enableSliceController {
 		if err := (&controller.SliceReconciler{
-			Client:   mgr.GetClient(),
-			Scheme:   mgr.GetScheme(),
-			Recorder: mgr.GetEventRecorderFor("tpu-provisioner"),
+			Client:                   mgr.GetClient(),
+			Scheme:                   mgr.GetScheme(),
+			Recorder:                 mgr.GetEventRecorderFor("tpu-provisioner"),
+			RecreateConditionReasons: cfg.SliceRecreateConditionReasons,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "SliceReconciler")
 			os.Exit(1)

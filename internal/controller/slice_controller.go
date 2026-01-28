@@ -50,8 +50,9 @@ const SliceSelectionAnnotation = "tpu-provisioner.cloud.google.com/slice-selecti
 
 type SliceReconciler struct {
 	client.Client
-	Recorder record.EventRecorder
-	Scheme   *runtime.Scheme
+	Recorder                 record.EventRecorder
+	Scheme                   *runtime.Scheme
+	RecreateConditionReasons []string
 }
 
 func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -123,7 +124,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Determine which slices to delete and create
-	toDelete, toCreate := diffSlices(desiredSlices, existingSliceList.Items)
+	toDelete, toCreate := diffSlices(desiredSlices, existingSliceList.Items, r.RecreateConditionReasons)
 
 	// Delete slices that have changed
 	for _, slice := range toDelete {
@@ -349,9 +350,11 @@ func partitionsEqual(a, b []string) bool {
 // diffSlices compares desired slices with existing slices and returns
 // lists of slices to delete and create.
 // Slices are considered different if their PartitionIds differ.
-// When a slice needs to be deleted due to PartitionIds change, it is NOT included
-// in toCreate - the creation will happen in a subsequent reconciliation pass.
-func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice) (toDelete, toCreate []v1beta1.Slice) {
+// Slices are also considered for recreation if they have a Ready condition of False or Unknown
+// with a reason that matches one of the provided recreateConditionReasons.
+// When a slice needs to be deleted due to PartitionIds change or conditions,
+// it is NOT included in toCreate - the creation will happen in a subsequent reconciliation pass.
+func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateConditionReasons []string) (toDelete, toCreate []v1beta1.Slice) {
 	// Create a map of existing slices by name for quick lookup
 	existingMap := make(map[string]*v1beta1.Slice)
 	for i := range existing {
@@ -365,7 +368,15 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice) (toDelete, to
 			if !partitionsEqual(existingSlice.Spec.PartitionIds, desiredSlice.Spec.PartitionIds) {
 				// NodeSelector changed - delete existing (creation will happen in next reconcile)
 				toDelete = append(toDelete, *existingSlice)
+				continue
 			}
+
+			// Check if slice needs recreation based on its status
+			if recreationReasonsMatch(existingSlice, recreateConditionReasons) {
+				toDelete = append(toDelete, *existingSlice)
+				continue
+			}
+
 			// Otherwise, slice matches - no action needed
 		} else {
 			// Slice doesn't exist - create it
@@ -374,6 +385,26 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice) (toDelete, to
 	}
 
 	return toDelete, toCreate
+}
+
+func recreationReasonsMatch(slice *v1beta1.Slice, recreateConditionReasons []string) bool {
+	if len(recreateConditionReasons) == 0 {
+		return false
+	}
+
+	for _, cond := range slice.Status.Conditions {
+		if cond.Type == v1beta1.SliceStateConditionType {
+			if cond.Status == metav1.ConditionFalse || cond.Status == metav1.ConditionUnknown {
+				for _, reason := range recreateConditionReasons {
+					if cond.Reason == reason {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // handleSyncMode handles the sync provisioning mode by suspending the JobSet

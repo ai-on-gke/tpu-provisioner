@@ -14,6 +14,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
@@ -596,6 +597,76 @@ var _ = Describe("Slice controller", func() {
 
 		By("Verifying the second Slice is created after conflict removal")
 		assertSlicesCreated(ctx, js, expectedAllSlices)
+	})
+	It("should recreate Slices when they have a failed Ready condition with a matching reason", func() {
+		ctx := context.Background()
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-ns-recreate-",
+			},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		defer func() {
+			Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
+		}()
+
+		js := constructJobSet("js-recreate",
+			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
+			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["cube-14"]]}`),
+			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
+		)
+		js.Namespace = ns.Name
+		Expect(k8sClient.Create(ctx, js)).To(Succeed())
+
+		By("Verifying initial Slice is created")
+		var sliceList v1beta1.SliceList
+		Eventually(func() int {
+			k8sClient.List(ctx, &sliceList, client.InNamespace(ns.Name), client.MatchingLabels{
+				controller.SliceOwnerNameLabel: js.Name,
+			})
+			return len(sliceList.Items)
+		}, timeout, interval).Should(Equal(1))
+
+		initialSlice := sliceList.Items[0]
+		initialUID := initialSlice.UID
+
+		By("Verifying Slice is not recreated before condition update")
+		Consistently(func() types.UID {
+			var currentSliceList v1beta1.SliceList
+			k8sClient.List(ctx, &currentSliceList, client.InNamespace(ns.Name), client.MatchingLabels{
+				controller.SliceOwnerNameLabel: js.Name,
+			})
+			if len(currentSliceList.Items) != 1 {
+				return ""
+			}
+			return currentSliceList.Items[0].UID
+		}, 2*time.Second, interval).Should(Equal(initialUID))
+
+		By("Updating Slice status to a matching recreation reason")
+		initialSlice.Status.Conditions = []metav1.Condition{
+			{
+				Type:               v1beta1.SliceStateConditionType,
+				Status:             metav1.ConditionFalse,
+				Reason:             "FailedToProvision",
+				Message:            "Simulated failure",
+				LastTransitionTime: metav1.Now(),
+			},
+		}
+		Expect(k8sClient.Status().Update(ctx, &initialSlice)).To(Succeed())
+
+		By("Verifying Slice is recreated (new UID)")
+		Eventually(func() (types.UID, error) {
+			var updatedSliceList v1beta1.SliceList
+			if err := k8sClient.List(ctx, &updatedSliceList, client.InNamespace(ns.Name), client.MatchingLabels{
+				controller.SliceOwnerNameLabel: js.Name,
+			}); err != nil {
+				return "", err
+			}
+			if len(updatedSliceList.Items) != 1 {
+				return "", fmt.Errorf("expected 1 slice, got %d", len(updatedSliceList.Items))
+			}
+			return updatedSliceList.Items[0].UID, nil
+		}, timeout, interval).ShouldNot(Equal(initialUID))
 	})
 })
 
