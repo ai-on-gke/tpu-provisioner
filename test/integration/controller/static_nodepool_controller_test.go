@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
@@ -517,6 +518,29 @@ machineType: "tpu-v4"
 			By("Injecting ERROR state")
 			provider.SetErrorState("error-pool-0001", true)
 
+			By("Verifying ERROR state is visible")
+			Eventually(func() bool {
+				nodePools, err := provider.ListNodePools()
+				if err != nil {
+					return false
+				}
+				for _, np := range nodePools {
+					if np.Name == "error-pool-0001" && np.Error {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue(), "error-pool-0001 should be in ERROR state")
+
+			By("Triggering reconciliation")
+			// Trigger a reconcile for the controller to see the state change
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: controller.ConfigMapName, Namespace: testNamespace}, cm)).To(Succeed())
+			if cm.Annotations == nil {
+				cm.Annotations = make(map[string]string)
+			}
+			cm.Annotations["trigger"] = time.Now().String()
+			Expect(k8sClient.Update(ctx, cm)).To(Succeed())
+
 			By("Waiting for deletion (recovery)")
 			Eventually(func() bool {
 				_, deleted := provider.getDeleted("error-pool-0001")
@@ -530,8 +554,6 @@ machineType: "tpu-v4"
 					return false
 				}
 				for _, np := range nodePools {
-					// We expect it to be present and NOT in error state (SetErrorState clears on delete/recreate usually?
-					// Wait, mockProvider Delete clears error state. So recreation should be clean.
 					if np.Name == "error-pool-0001" && !np.Error {
 						return true
 					}
