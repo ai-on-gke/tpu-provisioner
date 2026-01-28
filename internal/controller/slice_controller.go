@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
@@ -48,11 +49,16 @@ Example value:
 */
 const SliceSelectionAnnotation = "tpu-provisioner.cloud.google.com/slice-selection"
 
+type RecreateCondition struct {
+	Reason           string
+	MessageSubstring string
+}
+
 type SliceReconciler struct {
 	client.Client
-	Recorder                 record.EventRecorder
-	Scheme                   *runtime.Scheme
-	RecreateConditionReasons []string
+	Recorder           record.EventRecorder
+	Scheme             *runtime.Scheme
+	RecreateConditions []RecreateCondition
 }
 
 func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -124,7 +130,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Determine which slices to delete and create
-	toDelete, toCreate := diffSlices(desiredSlices, existingSliceList.Items, r.RecreateConditionReasons)
+	toDelete, toCreate := diffSlices(desiredSlices, existingSliceList.Items, r.RecreateConditions)
 
 	// Delete slices that have changed
 	for _, slice := range toDelete {
@@ -351,10 +357,10 @@ func partitionsEqual(a, b []string) bool {
 // lists of slices to delete and create.
 // Slices are considered different if their PartitionIds differ.
 // Slices are also considered for recreation if they have a Ready condition of False or Unknown
-// with a reason that matches one of the provided recreateConditionReasons.
+// with a reason and optional message substring that matches one of the provided recreateConditionReasons.
 // When a slice needs to be deleted due to PartitionIds change or conditions,
 // it is NOT included in toCreate - the creation will happen in a subsequent reconciliation pass.
-func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateConditionReasons []string) (toDelete, toCreate []v1beta1.Slice) {
+func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateConditionReasons []RecreateCondition) (toDelete, toCreate []v1beta1.Slice) {
 	// Create a map of existing slices by name for quick lookup
 	existingMap := make(map[string]*v1beta1.Slice)
 	for i := range existing {
@@ -387,16 +393,16 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateCondi
 	return toDelete, toCreate
 }
 
-func recreationReasonsMatch(slice *v1beta1.Slice, recreateConditionReasons []string) bool {
-	if len(recreateConditionReasons) == 0 {
+func recreationReasonsMatch(slice *v1beta1.Slice, recreateConditions []RecreateCondition) bool {
+	if len(recreateConditions) == 0 {
 		return false
 	}
 
 	for _, cond := range slice.Status.Conditions {
 		if cond.Type == v1beta1.SliceStateConditionType {
 			if cond.Status == metav1.ConditionFalse || cond.Status == metav1.ConditionUnknown {
-				for _, reason := range recreateConditionReasons {
-					if cond.Reason == reason {
+				for _, r := range recreateConditions {
+					if cond.Reason == r.Reason && (r.MessageSubstring == "" || strings.Contains(cond.Message, r.MessageSubstring)) {
 						return true
 					}
 				}
@@ -405,6 +411,29 @@ func recreationReasonsMatch(slice *v1beta1.Slice, recreateConditionReasons []str
 	}
 
 	return false
+}
+
+func ParseRecreateConditions(raw []string) []RecreateCondition {
+	var result []RecreateCondition
+	for _, s := range raw {
+		if s == "" {
+			continue
+		}
+		// Format: Reason or Reason:'Message Substring'
+		parts := strings.SplitN(s, ":", 2)
+		reason := strings.TrimSpace(parts[0])
+		var substring string
+		if len(parts) > 1 {
+			substring = strings.TrimSpace(parts[1])
+			// Strip single quotes if present
+			substring = strings.Trim(substring, "'")
+		}
+		result = append(result, RecreateCondition{
+			Reason:           reason,
+			MessageSubstring: substring,
+		})
+	}
+	return result
 }
 
 // handleSyncMode handles the sync provisioning mode by suspending the JobSet

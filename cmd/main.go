@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kelseyhightower/envconfig"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/cmd/config"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -78,50 +78,11 @@ func init() {
 }
 
 func main() {
-	var cfg struct {
-		// Provider can be "gke" or "mock".
-		Provider string `envconfig:"PROVIDER" default:"gke"`
-
-		GCPProjectID          string `envconfig:"GCP_PROJECT_ID"`
-		GCPClusterLocation    string `envconfig:"GCP_CLUSTER_LOCATION"`
-		GCPZone               string `envconfig:"GCP_ZONE"`
-		GCPCluster            string `envconfig:"GCP_CLUSTER"`
-		GCPNodeServiceAccount string `envconfig:"GCP_NODE_SERVICE_ACCOUNT"`
-
-		GCPNodeTags               []string `envconfig:"GCP_NODE_TAGS"`
-		GCPPodToNodeLabels        []string `envconfig:"GCP_POD_TO_NODE_LABELS"`
-		GCPNodeSecondaryDisk      string   `envconfig:"GCP_NODE_SECONDARY_DISK" default:""`
-		GCPNodeSecureBoot         bool     `envconfig:"GCP_NODE_SECURE_BOOT" default:"true"`
-		GCPNodeAdditionalNetworks string   `envconfig:"GCP_NODE_ADDITIONAL_NETWORKS" default:""`
-
-		GCPNodeDiskType            string `envconfig:"GCP_NODE_DISK_TYPE"`
-		GCPNodeConfidentialStorage bool   `envconfig:"GCP_NODE_CONFIDENTIAL_STORAGE"`
-		GCPNodeBootDiskKMSKey      string `envconfig:"GCP_NODE_BOOT_DISK_KMS_KEY"`
-
-		// GCPForceOnDemand forces the controller to create nodes on demand, even if
-		// the Pod requests a reservation or spot.
-		GCPForceOnDemand bool `envconfig:"GCP_FORCE_ON_DEMAND" default:"false"`
-
-		// NodeMinLifespan is the amount of time that should pass between a Node object
-		// creation and a cleanup of that Node. This is mostly irrelevant now that JobSet
-		// existance is checked before deleting a NodePool.
-		NodeMinLifespan time.Duration `envconfig:"NODE_MIN_LIFESPAN" default:"10s"`
-
-		NodepoolDeletionDelay time.Duration `envconfig:"NODEPOOL_DELETION_DELAY" default:"30s"`
-
-		PodResourceType string `envconfig:"POD_RESOURCE_TYPE" default:"google.com/tpu"`
-
-		Concurrency int `envconfig:"CONCURRENCY" default:"3"`
-
-		StaticNodepoolCreateConcurrency int           `envconfig:"STATIC_NODEPOOL_CREATE_CONCURRENCY" default:"3"`
-		StaticNodepoolCreateTimeout     time.Duration `envconfig:"STATIC_NODEPOOL_CREATE_TIMEOUT" default:"10m"`
-		StaticNodepoolDeleteConcurrency int           `envconfig:"STATIC_NODEPOOL_DELETE_CONCURRENCY" default:"3"`
-
-		PodNamespace string `envconfig:"POD_NAMESPACE"`
-
-		SliceRecreateConditionReasons []string `envconfig:"SLICE_RECREATE_CONDITION_REASONS"`
+	cfg, err := config.ParseEnv()
+	if err != nil {
+		setupLog.Error(err, "unable to parse environment variables")
+		os.Exit(1)
 	}
-	envconfig.MustProcess("", &cfg)
 
 	var metricsAddr string
 	var enableLeaderElection bool
@@ -274,11 +235,12 @@ func main() {
 	}
 
 	if enableSliceController {
+		recreateConditions := controller.ParseRecreateConditions(cfg.SliceRecreateConditions)
 		if err := (&controller.SliceReconciler{
-			Client:                   mgr.GetClient(),
-			Scheme:                   mgr.GetScheme(),
-			Recorder:                 mgr.GetEventRecorderFor("tpu-provisioner"),
-			RecreateConditionReasons: cfg.SliceRecreateConditionReasons,
+			Client:             mgr.GetClient(),
+			Scheme:             mgr.GetScheme(),
+			Recorder:           mgr.GetEventRecorderFor("tpu-provisioner"),
+			RecreateConditions: recreateConditions,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "SliceReconciler")
 			os.Exit(1)
