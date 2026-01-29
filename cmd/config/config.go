@@ -64,7 +64,7 @@ type Config struct {
 	PodNamespace string `envconfig:"POD_NAMESPACE"`
 
 	SliceRecreateConditions      []string      `envconfig:"SLICE_RECREATE_CONDITIONS"`
-	SliceConditionalRecreateWait time.Duration `envconfig:"SLICE_CONDITIONAL_RECREATE_WAIT" default:"10s"`
+	SliceConditionalRecreateWait time.Duration `envconfig:"SLICE_CONDITIONAL_RECREATE_WAIT" default:"60s"`
 }
 
 func ParseEnv() (Config, error) {
