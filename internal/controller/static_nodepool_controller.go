@@ -148,17 +148,6 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 		// Check if a specific nodepool is in use.
 		isNodepoolInUse := func(npName string) bool {
-			// Match by Subblock Names (Subblock paths)
-			np, ok := existingMap[npName]
-			if !ok {
-				return false
-			}
-			for _, val := range np.SubblockNames {
-				if usedPartitions[val] {
-					return true
-				}
-			}
-
 			// Match by Partition IDs found on Nodes (UUIDs)
 			if ids, ok := nodepoolPartitionIDs[npName]; ok {
 				for id := range ids {
@@ -181,9 +170,7 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 						skippedUpdates[name] = true
 					}
 					if np, ok := existingMap[name]; ok {
-						for _, val := range np.SubblockNames {
-							skippedCapacity[val] = true
-						}
+						skippedCapacity[np.SubblockName] = true
 					}
 					continue
 				}

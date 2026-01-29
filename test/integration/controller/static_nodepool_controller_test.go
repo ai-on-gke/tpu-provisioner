@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
 )
 
@@ -255,18 +256,28 @@ machineType: "tpu-v4"
 				return false
 			}, timeout, interval).Should(BeTrue())
 
-			// Subblock ID constructed based on mock provider project ID and reservation config
-			subblockID := "projects/test-project/reservations/res-slice/reservationBlocks/block-slice/reservationSubBlocks/block-slice-subblock-0001"
+			By("Creating a Node for the nodepool with a Partition UUID")
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "slice-test-node-0",
+					Labels: map[string]string{
+						"cloud.google.com/gke-tpu-partition-4x4x4-id": "slice-test-uuid-1234",
+						cloud.GKENodePoolNameLabel:                    "slice-test-np-0001",
+						cloud.LabelTPUProvisionerStaticNodepool:       "true",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).To(Succeed())
 
-			By("Creating a Slice that uses this subblock")
+			By("Creating a Slice that uses this partition UUID")
 			slice := &v1beta1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-slice",
 				},
 				Spec: v1beta1.SliceSpec{
-					PartitionIds: []string{subblockID},
+					PartitionIds: []string{"slice-test-uuid-1234"},
 					Type:         "tpu7x",
-					Topology:     "2x2x1",
+					Topology:     "4x4x4",
 				},
 			}
 			Expect(k8sClient.Create(ctx, slice)).To(Succeed())
@@ -338,18 +349,28 @@ machineType: "tpu-v4"
 				return false
 			}, timeout, interval).Should(BeTrue())
 
-			// Subblock ID constructed based on mock provider project ID and reservation config
-			subblockID := "projects/test-project/reservations/res-race/reservationBlocks/block-race/reservationSubBlocks/block-race-subblock-0001"
+			By("Creating a Node for the nodepool with a Partition UUID")
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node-0",
+					Labels: map[string]string{
+						"cloud.google.com/gke-tpu-partition-4x4x4-id": "test-uuid-1234",
+						cloud.GKENodePoolNameLabel:                    "old-pool-0001",
+						cloud.LabelTPUProvisionerStaticNodepool:       "true",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, node)).To(Succeed())
 
-			By("Creating a Slice that locks this subblock")
+			By("Creating a Slice that locks this partition UUID")
 			slice := &v1beta1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "lock-slice",
 				},
 				Spec: v1beta1.SliceSpec{
-					PartitionIds: []string{subblockID},
+					PartitionIds: []string{"test-uuid-1234"},
 					Type:         "tpu7x",
-					Topology:     "2x2x1",
+					Topology:     "4x4x4",
 				},
 			}
 			Expect(k8sClient.Create(ctx, slice)).To(Succeed())

@@ -88,10 +88,14 @@ func (p *mockProvider) EnsureStaticNodePools(ctx context.Context, desiredNodePoo
 		}
 
 		p.Lock()
+		var subblockName string
+		if len(np.Config.ReservationAffinity.Values) > 0 {
+			subblockName = np.Config.ReservationAffinity.Values[0]
+		}
 		p.staticNodepoolsCreated[desired.Name] = cloud.NodePoolRef{
-			Name:          desired.Name,
-			Labels:        np.Config.Labels,
-			SubblockNames: np.Config.ReservationAffinity.Values,
+			Name:         desired.Name,
+			Labels:       np.Config.Labels,
+			SubblockName: subblockName,
 		}
 		// If it was in error, fixing it clears the error?
 		// For the test, we might want manual clearing or auto-clearing.

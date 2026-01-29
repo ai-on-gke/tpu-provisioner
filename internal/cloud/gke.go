@@ -195,9 +195,9 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 			labels = np.Config.Labels
 		}
 
-		var reservationValues []string
-		if np.Config != nil && np.Config.ReservationAffinity != nil {
-			reservationValues = np.Config.ReservationAffinity.Values
+		var subblockName string
+		if np.Config != nil && np.Config.ReservationAffinity != nil && len(np.Config.ReservationAffinity.Values) > 0 {
+			subblockName = np.Config.ReservationAffinity.Values[0]
 		}
 
 		refs = append(refs, NodePoolRef{
@@ -206,7 +206,7 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 			Message:          np.StatusMessage,
 			CreatedForJobSet: createdForJobSet,
 			Labels:           labels,
-			SubblockNames:    reservationValues,
+			SubblockName:     subblockName,
 		})
 	}
 
