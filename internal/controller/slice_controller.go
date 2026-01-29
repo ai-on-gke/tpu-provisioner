@@ -401,7 +401,10 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateCondi
 				} else {
 					// Jitter between 1 and 3 seconds to prevent thundering herd.
 					jitter := time.Duration(1+rand.Intn(2)) * time.Second
-					requeueAfter = existingSlice.CreationTimestamp.Add(conditionalRecreateWait).Sub(Now()) + jitter
+					thisRequeueAfter := existingSlice.CreationTimestamp.Add(conditionalRecreateWait).Sub(Now()) + jitter
+					if requeueAfter == 0 || thisRequeueAfter < requeueAfter {
+						requeueAfter = thisRequeueAfter
+					}
 				}
 				continue
 			}

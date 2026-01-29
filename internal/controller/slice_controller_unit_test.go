@@ -1105,6 +1105,48 @@ func TestDiffSlices(t *testing.T) {
 			},
 			wantToCreate: nil,
 		},
+		{
+			name: "select minimum requeueAfter for multiple slices",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: tpu7xAccelerator, topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+				makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: tpu7xAccelerator, topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  tpu7xAccelerator,
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionFalse,
+							Reason: "FailedToProvision",
+						},
+					},
+					creationTimestamp: metav1.NewTime(fakeNow.Add(-45 * time.Minute)),
+				}),
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-2",
+					accelType:  tpu7xAccelerator,
+					topology:   "4x4x8",
+					partitions: []string{"cube-3", "cube-4"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionFalse,
+							Reason: "FailedToProvision",
+						},
+					},
+					creationTimestamp: metav1.NewTime(fakeNow.Add(-30 * time.Minute)),
+				}),
+			},
+			recreateConditionReasons: []RecreateCondition{{Reason: "FailedToProvision"}},
+			conditionalRecreateWait:  time.Hour,
+			wantToDelete:             nil,
+			wantToCreate:             nil,
+			wantRequeueAfter:         15 * time.Minute,
+		},
 	}
 
 	for _, tt := range tests {
