@@ -80,6 +80,8 @@ func (p *mockProvider) EnsureStaticNodePools(ctx context.Context, desiredNodePoo
 		p.Lock()
 		var subblockName string
 		if len(np.Config.ReservationAffinity.Values) > 0 {
+			// Note: the current implementation of static nodepool provisioning
+			// only supports subblock-level targeting.
 			subblockName = np.Config.ReservationAffinity.Values[0]
 		}
 		p.staticNodepoolsCreated[desired.Name] = cloud.NodePoolRef{

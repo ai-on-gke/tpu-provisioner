@@ -128,42 +128,30 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	skippedUpdates := make(map[string]bool)
 
 	if len(toDeleteMissing) > 0 || len(toDeleteUpdate) > 0 {
-		// Get all partitions currently used by Slices
-		usedPartitions, err := r.getUsedPartitions(ctx)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting used partitions: %w", err)
+		// List all Slices
+		var sliceList v1beta1.SliceList
+		if err := r.List(ctx, &sliceList); err != nil {
+			return ctrl.Result{}, fmt.Errorf("listing slices: %w", err)
 		}
 
-		// Get partition IDs from Nodes
-		nodepoolPartitionIDs, err := r.getNodePartitionIDs(ctx)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting node partition IDs: %w", err)
+		// List all Nodes
+		var nodeList corev1.NodeList
+		if err := r.List(ctx, &nodeList, client.MatchingLabels{cloud.LabelTPUProvisionerStaticNodepool: "true"}); err != nil {
+			return ctrl.Result{}, fmt.Errorf("listing nodes: %w", err)
 		}
+
+		inUseNodepools := GetInUseNodepools(sliceList.Items, nodeList.Items)
 
 		existingMap := make(map[string]cloud.NodePoolRef)
 		for _, np := range existingNodePools {
 			existingMap[np.Name] = np
 		}
 
-		// Check if a specific nodepool is in use.
-		isNodepoolInUse := func(npName string) bool {
-			// Match by Partition IDs found on Nodes (UUIDs)
-			if ids, ok := nodepoolPartitionIDs[npName]; ok {
-				for id := range ids {
-					if usedPartitions[id] {
-						return true
-					}
-				}
-			}
-
-			return false
-		}
-
 		// Filter out toDelete nodepools that are locked by a Slice.
 		filterLocked := func(pools []string, actionName string, trackSkippedUpdates bool) []string {
 			var filtered []string
 			for _, name := range pools {
-				if isNodepoolInUse(name) {
+				if inUseNodepools[name] {
 					lg.Info("Skipping "+actionName+" of static nodepool because it is in use by a Slice", "nodepool", name)
 					if trackSkippedUpdates {
 						skippedUpdates[name] = true
@@ -238,48 +226,6 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, nil
 }
 
-func (r *StaticNodepoolReconciler) getUsedPartitions(ctx context.Context) (map[string]bool, error) {
-	var sliceList v1beta1.SliceList
-	if err := r.List(ctx, &sliceList); err != nil {
-		return nil, fmt.Errorf("listing slices: %w", err)
-	}
-
-	usedPartitions := make(map[string]bool)
-	for _, slice := range sliceList.Items {
-		for _, p := range slice.Spec.PartitionIds {
-			usedPartitions[p] = true
-		}
-	}
-	return usedPartitions, nil
-}
-
-func (r *StaticNodepoolReconciler) getNodePartitionIDs(ctx context.Context) (map[string]map[string]bool, error) {
-	// List all nodes to find partition IDs (UUIDs) associated with nodepools.
-	var nodeList corev1.NodeList
-	if err := r.List(ctx, &nodeList, client.MatchingLabels{cloud.LabelTPUProvisionerStaticNodepool: "true"}); err != nil {
-		return nil, fmt.Errorf("listing nodes: %w", err)
-	}
-
-	// Map NodePool Name -> Set of Partition IDs (UUIDs) found on its nodes
-	nodepoolPartitionIDs := make(map[string]map[string]bool)
-	for _, node := range nodeList.Items {
-		npName, ok := node.Labels[cloud.GKENodePoolNameLabel]
-		if !ok {
-			continue
-		}
-		if _, ok := nodepoolPartitionIDs[npName]; !ok {
-			nodepoolPartitionIDs[npName] = make(map[string]bool)
-		}
-		for k, v := range node.Labels {
-			// Check for labels like "cloud.google.com/gke-tpu-partition-*-id"
-			if utils.IsPartitionIDLabel(k) {
-				nodepoolPartitionIDs[npName][v] = true
-			}
-		}
-	}
-	return nodepoolPartitionIDs, nil
-}
-
 func (r *StaticNodepoolReconciler) constructDesiredNodePools(reservations []reservation, nodepoolConfig *cloud.StaticNodePoolConfig) ([]*cloud.DesiredStaticNodePool, error) {
 	var desiredNodePools []*cloud.DesiredStaticNodePool
 
@@ -325,4 +271,34 @@ func (r *StaticNodepoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 		Complete(r)
+}
+
+// GetInUseNodepools determines which nodepools are currently in use by Slices.
+// It returns a map where the key is the nodepool name and the value is true if it's in use.
+func GetInUseNodepools(slices []v1beta1.Slice, nodes []corev1.Node) map[string]bool {
+	usedPartitions := make(map[string]bool)
+	for _, slice := range slices {
+		for _, p := range slice.Spec.PartitionIds {
+			usedPartitions[p] = true
+		}
+	}
+
+	inUseNodepools := make(map[string]bool)
+	for _, node := range nodes {
+		npName, ok := node.Labels[cloud.GKENodePoolNameLabel]
+		if !ok {
+			continue
+		}
+
+		for k, v := range node.Labels {
+			// Check for labels like "cloud.google.com/gke-tpu-partition-*-id"
+			if utils.IsPartitionIDLabel(k) {
+				if usedPartitions[v] {
+					inUseNodepools[npName] = true
+					break // Found a used partition on this node, so the nodepool is in use.
+				}
+			}
+		}
+	}
+	return inUseNodepools
 }

@@ -285,6 +285,14 @@ machineType: "tpu-v4"
 			cm.Data["reservations"] = ""
 			Expect(k8sClient.Update(ctx, cm)).To(Succeed())
 
+			By("Verifying GetInUseNodepools reports the nodepool as in use")
+			var sliceList v1beta1.SliceList
+			Expect(k8sClient.List(ctx, &sliceList)).To(Succeed())
+			var nodeList corev1.NodeList
+			Expect(k8sClient.List(ctx, &nodeList)).To(Succeed())
+			inUse := controller.GetInUseNodepools(sliceList.Items, nodeList.Items)
+			Expect(inUse["slice-test-np-0001"]).To(BeTrue(), "GetInUseNodepools should report slice-test-np-0001 as in use")
+
 			By("Verifying nodepool is NOT deleted")
 			Consistently(func() bool {
 				_, deleted := provider.getDeleted("slice-test-np-0001")
