@@ -778,14 +778,18 @@ func TestDiffSlices(t *testing.T) {
 	Now = func() time.Time { return fakeNow }
 	defer func() { Now = oldNow }()
 
+	type expectedDiff struct {
+		name   string
+		reason string
+	}
 	tests := []struct {
 		name                     string
 		desired                  []v1beta1.Slice
 		existing                 []v1beta1.Slice
 		recreateConditionReasons []RecreateCondition
 		conditionalRecreateWait  time.Duration
-		wantToDelete             []diffedSlice
-		wantToCreate             []diffedSlice
+		wantToDelete             []expectedDiff
+		wantToCreate             []expectedDiff
 		wantRequeueAfter         time.Duration
 	}{
 		{
@@ -797,9 +801,9 @@ func TestDiffSlices(t *testing.T) {
 			existing:                 []v1beta1.Slice{},
 			recreateConditionReasons: nil,
 			wantToDelete:             nil,
-			wantToCreate: []diffedSlice{
-				{slice: makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}), reason: "desired slice does not exist"},
-				{slice: makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}), reason: "desired slice does not exist"},
+			wantToCreate: []expectedDiff{
+				{name: "slice-1", reason: "desired slice does not exist"},
+				{name: "slice-2", reason: "desired slice does not exist"},
 			},
 		},
 		{
@@ -813,9 +817,9 @@ func TestDiffSlices(t *testing.T) {
 				makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}),
 			},
 			recreateConditionReasons: nil,
-			wantToDelete: []diffedSlice{
-				{slice: makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}), reason: "partition IDs changed"},
-				{slice: makeSliceWithAccel(sliceOptions{name: "slice-2", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3", "cube-4"}}), reason: "partition IDs changed"},
+			wantToDelete: []expectedDiff{
+				{name: "slice-1", reason: "partition IDs changed"},
+				{name: "slice-2", reason: "partition IDs changed"},
 			},
 			wantToCreate: nil,
 		},
@@ -855,24 +859,8 @@ func TestDiffSlices(t *testing.T) {
 				}),
 			},
 			recreateConditionReasons: []RecreateCondition{{Reason: "FailedToProvision"}},
-			wantToDelete: []diffedSlice{
-				{
-					slice: makeSliceWithAccel(sliceOptions{
-						name:       "slice-1",
-						accelType:  "tpu-v7x",
-						topology:   "4x4x8",
-						partitions: []string{"cube-1", "cube-2"},
-						conditions: []metav1.Condition{
-							{
-								Type:    v1beta1.SliceStateConditionType,
-								Status:  metav1.ConditionFalse,
-								Reason:  "FailedToProvision",
-								Message: "Some internal error occurred",
-							},
-						},
-					}),
-					reason: "recreation condition matched: FailedToProvision: Some internal error occurred",
-				},
+			wantToDelete: []expectedDiff{
+				{name: "slice-1", reason: "recreation condition matched: FailedToProvision: Some internal error occurred"},
 			},
 			wantToCreate: nil,
 		},
@@ -898,24 +886,8 @@ func TestDiffSlices(t *testing.T) {
 				}),
 			},
 			recreateConditionReasons: []RecreateCondition{{Reason: "FailedToProvision", MessageSubstring: "permission denied"}},
-			wantToDelete: []diffedSlice{
-				{
-					slice: makeSliceWithAccel(sliceOptions{
-						name:       "slice-1",
-						accelType:  "tpu-v7x",
-						topology:   "4x4x8",
-						partitions: []string{"cube-1", "cube-2"},
-						conditions: []metav1.Condition{
-							{
-								Type:    v1beta1.SliceStateConditionType,
-								Status:  metav1.ConditionFalse,
-								Reason:  "FailedToProvision",
-								Message: "Internal error: permission denied",
-							},
-						},
-					}),
-					reason: "recreation condition matched: FailedToProvision: Internal error: permission denied",
-				},
+			wantToDelete: []expectedDiff{
+				{name: "slice-1", reason: "recreation condition matched: FailedToProvision: Internal error: permission denied"},
 			},
 			wantToCreate: nil,
 		},
@@ -989,23 +961,8 @@ func TestDiffSlices(t *testing.T) {
 				}),
 			},
 			recreateConditionReasons: []RecreateCondition{{Reason: "FailedToProvision"}, {Reason: "ProvisioningTimeout"}},
-			wantToDelete: []diffedSlice{
-				{
-					slice: makeSliceWithAccel(sliceOptions{
-						name:       "slice-1",
-						accelType:  "tpu-v7x",
-						topology:   "4x4x8",
-						partitions: []string{"cube-1", "cube-2"},
-						conditions: []metav1.Condition{
-							{
-								Type:   v1beta1.SliceStateConditionType,
-								Status: metav1.ConditionUnknown,
-								Reason: "ProvisioningTimeout",
-							},
-						},
-					}),
-					reason: "recreation condition matched: ProvisioningTimeout",
-				},
+			wantToDelete: []expectedDiff{
+				{name: "slice-1", reason: "recreation condition matched: ProvisioningTimeout"},
 			},
 			wantToCreate: nil,
 		},
@@ -1084,24 +1041,8 @@ func TestDiffSlices(t *testing.T) {
 			},
 			recreateConditionReasons: []RecreateCondition{{Reason: "FailedToProvision"}},
 			conditionalRecreateWait:  time.Hour,
-			wantToDelete: []diffedSlice{
-				{
-					slice: makeSliceWithAccel(sliceOptions{
-						name:       "slice-1",
-						accelType:  tpu7xAccelerator,
-						topology:   "4x4x8",
-						partitions: []string{"cube-1", "cube-2"},
-						conditions: []metav1.Condition{
-							{
-								Type:   v1beta1.SliceStateConditionType,
-								Status: metav1.ConditionFalse,
-								Reason: "FailedToProvision",
-							},
-						},
-						creationTimestamp: metav1.NewTime(fakeNow.Add(-90 * time.Minute)),
-					}),
-					reason: "recreation condition matched: FailedToProvision",
-				},
+			wantToDelete: []expectedDiff{
+				{name: "slice-1", reason: "recreation condition matched: FailedToProvision"},
 			},
 			wantToCreate: nil,
 		},
@@ -1153,14 +1094,14 @@ func TestDiffSlices(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gotToDelete, gotToCreate, gotRequeueAfter := diffSlices(tt.desired, tt.existing, tt.recreateConditionReasons, tt.conditionalRecreateWait)
 
-			compareSlices := func(msg string, want, got []diffedSlice) {
+			compareSlices := func(msg string, want []expectedDiff, got []diffedSlice) {
 				if len(want) != len(got) {
 					t.Errorf("%s length mismatch: want %d, got %d", msg, len(want), len(got))
 					return
 				}
 				for i := range want {
-					if want[i].slice.Name != got[i].slice.Name {
-						t.Errorf("%s[%d] slice name mismatch: want %s, got %s", msg, i, want[i].slice.Name, got[i].slice.Name)
+					if want[i].name != got[i].slice.Name {
+						t.Errorf("%s[%d] slice name mismatch: want %s, got %s", msg, i, want[i].name, got[i].slice.Name)
 					}
 					if want[i].reason != got[i].reason {
 						t.Errorf("%s[%d] reason mismatch: want %s, got %s", msg, i, want[i].reason, got[i].reason)
