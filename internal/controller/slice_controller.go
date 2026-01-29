@@ -75,6 +75,8 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	log.V(3).Info("Reconciling JobSet to Slices")
 
+	now := Now()
+
 	var js jobset.JobSet
 	if err := r.Get(ctx, req.NamespacedName, &js); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -139,7 +141,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Determine which slices to delete and create
-	toDelete, toCreate, requeueAfter := diffSlices(desiredSlices, existingSliceList.Items, r.RecreateConditions, r.ConditionalRecreateWait)
+	toDelete, toCreate, requeueAfter := diffSlices(desiredSlices, existingSliceList.Items, now, r.RecreateConditions, r.ConditionalRecreateWait)
 	if requeueAfter > 0 {
 		log.Info("Some Slices need to be deleted, but are in a state that requires requeuing", "requeueAfter", requeueAfter)
 	}
@@ -377,7 +379,7 @@ func partitionsEqual(a, b []string) bool {
 // with a reason and optional message substring that matches one of the provided recreateConditionReasons.
 // When a slice needs to be deleted due to PartitionIds change or conditions,
 // it is NOT included in toCreate - the creation will happen in a subsequent reconciliation pass.
-func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateConditionReasons []RecreateCondition, conditionalRecreateWait time.Duration) (toDelete, toCreate []diffedSlice, requeueAfter time.Duration) {
+func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, now time.Time, recreateConditionReasons []RecreateCondition, conditionalRecreateWait time.Duration) (toDelete, toCreate []diffedSlice, requeueAfter time.Duration) {
 	// Create a map of existing slices by name for quick lookup
 	existingMap := make(map[string]*v1beta1.Slice)
 	for i := range existing {
@@ -396,12 +398,12 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateCondi
 
 			// Check if slice needs recreation based on its status
 			if reason, matches := recreationReasonsMatch(existingSlice, recreateConditionReasons); matches {
-				if existingSlice.CreationTimestamp.Add(conditionalRecreateWait).Before(Now()) {
+				if existingSlice.CreationTimestamp.Add(conditionalRecreateWait).Before(now) {
 					toDelete = append(toDelete, diffedSlice{slice: *existingSlice, reason: fmt.Sprintf("recreation condition matched: %s", reason)})
 				} else {
 					// Jitter between 1 and 3 seconds to prevent thundering herd.
 					jitter := time.Duration(1+rand.Intn(2)) * time.Second
-					thisRequeueAfter := existingSlice.CreationTimestamp.Add(conditionalRecreateWait).Sub(Now()) + jitter
+					thisRequeueAfter := existingSlice.CreationTimestamp.Add(conditionalRecreateWait).Sub(now) + jitter
 					if requeueAfter == 0 || thisRequeueAfter < requeueAfter {
 						requeueAfter = thisRequeueAfter
 					}

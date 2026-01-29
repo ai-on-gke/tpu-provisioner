@@ -774,9 +774,6 @@ func TestParseSliceSelection(t *testing.T) {
 
 func TestDiffSlices(t *testing.T) {
 	fakeNow := time.Date(2026, 1, 28, 20, 0, 0, 0, time.UTC)
-	oldNow := Now
-	Now = func() time.Time { return fakeNow }
-	defer func() { Now = oldNow }()
 
 	type expectedDiff struct {
 		name   string
@@ -1092,7 +1089,7 @@ func TestDiffSlices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotToDelete, gotToCreate, gotRequeueAfter := diffSlices(tt.desired, tt.existing, tt.recreateConditionReasons, tt.conditionalRecreateWait)
+			gotToDelete, gotToCreate, gotRequeueAfter := diffSlices(tt.desired, tt.existing, fakeNow, tt.recreateConditionReasons, tt.conditionalRecreateWait)
 
 			compareSlices := func(msg string, want []expectedDiff, got []diffedSlice) {
 				if len(want) != len(got) {
