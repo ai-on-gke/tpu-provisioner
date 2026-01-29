@@ -66,7 +66,6 @@ type StaticNodepoolReconciler struct {
 }
 
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-//+kubebuilder:rbac:groups="accelerator.gke.io",resources=slices,verbs=get;list;watch
 
 func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	lg := ctrllog.FromContext(ctx)

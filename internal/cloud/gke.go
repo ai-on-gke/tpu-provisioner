@@ -268,8 +268,6 @@ func (s nodePoolState) String() string {
 		return "ExistsAndNotMatches"
 	case nodePoolStateExistsAndStopping:
 		return "ExistsAndStopping"
-	case nodePoolStateExistsAndError:
-		return "ExistsAndError"
 	default:
 		return "Unknown"
 	}
@@ -281,20 +279,12 @@ const (
 	nodePoolStateExistsAndMatches
 	nodePoolStateExistsAndNotMatches
 	nodePoolStateExistsAndStopping
-	nodePoolStateExistsAndError
 )
 
 func (g *GKE) checkExistingNodePoolState(ctx context.Context, desired *containerv1beta1.NodePool) (nodePoolState, error) {
 	existing, err := g.NodePools.Get(ctx, desired.Name)
 
 	if err == nil {
-		if existing.Status == "STOPPING" {
-			return nodePoolStateExistsAndStopping, nil
-		}
-		if existing.Status == "ERROR" {
-			return nodePoolStateExistsAndError, nil
-		}
-
 		match, err := nodePoolHashesMatch(desired, existing)
 		if err != nil {
 			return nodePoolStateUnknown, fmt.Errorf("comparing node pools: %w", err)
@@ -307,6 +297,10 @@ func (g *GKE) checkExistingNodePoolState(ctx context.Context, desired *container
 	}
 	if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
 		return nodePoolStateNotExists, nil
+	}
+
+	if existing != nil && existing.Status == "STOPPING" {
+		return nodePoolStateExistsAndStopping, nil
 	}
 
 	return nodePoolStateUnknown, err
@@ -657,9 +651,6 @@ func waitForGkeOp(ctx context.Context, svc *containerv1beta1.Service, c GKEConte
 	for start := time.Now(); time.Since(start) < operationWaitTimeout; time.Sleep(operationPollInterval) {
 		if op, err := svc.Projects.Locations.Operations.Get(c.OpName(operation.Name)).Context(ctx).Do(); err == nil {
 			if op.Status == "DONE" {
-				if op.Error != nil {
-					return fmt.Errorf("operation failed: %v", op.Error.Message)
-				}
 				return nil
 			}
 		} else {
@@ -791,54 +782,39 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, desiredNodePools []*Des
 			}
 			log.Info("Determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
 
-			state, err := g.checkExistingNodePoolState(ctx, np)
+			npExists, err := g.checkNodePoolExists(ctx, np)
 			if err != nil {
 				errs <- fmt.Errorf("checking if node pool exists: %w", err)
 				return
 			}
 			log.Info("Checked whether static node pool already exists",
-				"nodePoolName", np.Name, "existingNodePoolState", state,
+				"nodePoolName", np.Name, "existingNodePoolState", npExists,
 			)
 
-			switch state {
-			case nodePoolStateNotExists:
-				// Proceed to create
-			case nodePoolStateExistsAndMatches:
-				return
-			case nodePoolStateExistsAndStopping:
-				errs <- fmt.Errorf("node pool %s is stopping, waiting for deletion: %w", np.Name, ErrNodePoolStopping)
-				return
-			case nodePoolStateExistsAndError:
-				errs <- fmt.Errorf("node pool %s is in error state, waiting for deletion: %w", np.Name, ErrNodePoolDeletedToBeRecreated)
-				return
-			case nodePoolStateExistsAndNotMatches:
-				// If it exists but doesn't match, Diff should have scheduled a deletion.
-				// We should wait for that deletion.
-				errs <- fmt.Errorf("node pool %s exists but does not match, waiting for deletion: %w", np.Name, ErrNodePoolDeletedToBeRecreated)
-				return
-			}
-			req := &containerv1beta1.CreateNodePoolRequest{
-				NodePool: np,
-				Parent:   g.ClusterContext.ClusterName(),
-			}
+			if !npExists {
+				req := &containerv1beta1.CreateNodePoolRequest{
+					NodePool: np,
+					Parent:   g.ClusterContext.ClusterName(),
+				}
 
-			log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
-			g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationStarted, "Starting creation of static Node Pool %s", np.Name)
-			if err := g.NodePools.Create(ctx, req, OpCallbacks{
-				ReqFailure: func(err error) {
-					log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
-					g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Request to create Node Pool %s failed: %v.", np.Name, err)
-				},
-				OpFailure: func(err error) {
-					log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
-					g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Operation to create Node Pool %s failed: %v.", np.Name, err)
-				},
-				Success: func() {
-					log.Info("successfully created static node pool", "nodePoolName", np.Name)
-					g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationSucceeded, "Successfully created Node Pool %s.", np.Name)
-				},
-			}); err != nil {
-				errs <- err
+				log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
+				g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationStarted, "Starting creation of static Node Pool %s", np.Name)
+				if err := g.NodePools.Create(ctx, req, OpCallbacks{
+					ReqFailure: func(err error) {
+						log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
+						g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Request to create Node Pool %s failed: %v.", np.Name, err)
+					},
+					OpFailure: func(err error) {
+						log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
+						g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Operation to create Node Pool %s failed: %v.", np.Name, err)
+					},
+					Success: func() {
+						log.Info("successfully created static node pool", "nodePoolName", np.Name)
+						g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationSucceeded, "Successfully created Node Pool %s.", np.Name)
+					},
+				}); err != nil {
+					errs <- err
+				}
 			}
 		}(desired)
 	}
