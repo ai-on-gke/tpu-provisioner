@@ -2,6 +2,7 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/google/go-cmp/cmp"
@@ -771,13 +772,20 @@ func TestParseSliceSelection(t *testing.T) {
 }
 
 func TestDiffSlices(t *testing.T) {
+	fakeNow := time.Date(2026, 1, 28, 20, 0, 0, 0, time.UTC)
+	oldNow := Now
+	Now = func() time.Time { return fakeNow }
+	defer func() { Now = oldNow }()
+
 	tests := []struct {
 		name                     string
 		desired                  []v1beta1.Slice
 		existing                 []v1beta1.Slice
 		recreateConditionReasons []RecreateCondition
+		conditionalRecreateWait  time.Duration
 		wantToDelete             []v1beta1.Slice
 		wantToCreate             []v1beta1.Slice
+		wantRequeueAfter         time.Duration
 	}{
 		{
 			name: "create new slices when none exist",
@@ -1016,16 +1024,91 @@ func TestDiffSlices(t *testing.T) {
 			wantToDelete:             nil,
 			wantToCreate:             nil,
 		},
+		{
+			name: "do not delete slice if younger than conditionalRecreateWait",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: tpu7xAccelerator, topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  tpu7xAccelerator,
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionFalse,
+							Reason: "FailedToProvision",
+						},
+					},
+					creationTimestamp: metav1.NewTime(fakeNow.Add(-30 * time.Minute)),
+				}),
+			},
+			recreateConditionReasons: []RecreateCondition{{Reason: "FailedToProvision"}},
+			conditionalRecreateWait:  time.Hour,
+			wantToDelete:             nil,
+			wantToCreate:             nil,
+			wantRequeueAfter:         30 * time.Minute,
+		},
+		{
+			name: "delete slice if older than conditionalRecreateWait",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "slice-1", accelType: tpu7xAccelerator, topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  tpu7xAccelerator,
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionFalse,
+							Reason: "FailedToProvision",
+						},
+					},
+					creationTimestamp: metav1.NewTime(fakeNow.Add(-90 * time.Minute)),
+				}),
+			},
+			recreateConditionReasons: []RecreateCondition{{Reason: "FailedToProvision"}},
+			conditionalRecreateWait:  time.Hour,
+			wantToDelete: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{
+					name:       "slice-1",
+					accelType:  tpu7xAccelerator,
+					topology:   "4x4x8",
+					partitions: []string{"cube-1", "cube-2"},
+					conditions: []metav1.Condition{
+						{
+							Type:   v1beta1.SliceStateConditionType,
+							Status: metav1.ConditionFalse,
+							Reason: "FailedToProvision",
+						},
+					},
+					creationTimestamp: metav1.NewTime(fakeNow.Add(-90 * time.Minute)),
+				}),
+			},
+			wantToCreate: nil,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotToDelete, gotToCreate := diffSlices(tt.desired, tt.existing, tt.recreateConditionReasons)
+			gotToDelete, gotToCreate, gotRequeueAfter := diffSlices(tt.desired, tt.existing, tt.recreateConditionReasons, tt.conditionalRecreateWait)
 			if diff := cmp.Diff(tt.wantToDelete, gotToDelete); diff != "" {
 				t.Errorf("diffSlices() toDelete mismatch (-want +got):\n%s", diff)
 			}
 			if diff := cmp.Diff(tt.wantToCreate, gotToCreate); diff != "" {
 				t.Errorf("diffSlices() toCreate mismatch (-want +got):\n%s", diff)
+			}
+			if tt.wantRequeueAfter != 0 {
+				if gotRequeueAfter < tt.wantRequeueAfter || gotRequeueAfter > tt.wantRequeueAfter+3*time.Second {
+					t.Errorf("diffSlices() requeueAfter = %v, want between %v and %v", gotRequeueAfter, tt.wantRequeueAfter, tt.wantRequeueAfter+3*time.Second)
+				}
+			} else if gotRequeueAfter != 0 {
+				t.Errorf("diffSlices() requeueAfter = %v, want 0", gotRequeueAfter)
 			}
 		})
 	}
@@ -1084,11 +1167,12 @@ func TestParseRecreateConditions(t *testing.T) {
 }
 
 type sliceOptions struct {
-	name       string
-	accelType  string
-	topology   string
-	partitions []string
-	conditions []metav1.Condition
+	name              string
+	accelType         string
+	topology          string
+	partitions        []string
+	conditions        []metav1.Condition
+	creationTimestamp metav1.Time
 }
 
 // Helper function to create a Slice object for testing
@@ -1105,6 +1189,7 @@ func makeSlice(name, topology string, cubes ...string) v1beta1.Slice {
 func makeSliceWithAccel(opts sliceOptions) v1beta1.Slice {
 	s := makeSliceWithJobSet(opts.name, opts.accelType, opts.topology, "test-jobset", "default", opts.partitions...)
 	s.Status.Conditions = opts.conditions
+	s.CreationTimestamp = opts.creationTimestamp
 	return s
 }
 

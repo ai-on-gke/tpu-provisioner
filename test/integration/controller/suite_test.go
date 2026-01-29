@@ -134,10 +134,11 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&controller.SliceReconciler{
-		Client:             mgr.GetClient(),
-		Scheme:             mgr.GetScheme(),
-		Recorder:           mgr.GetEventRecorderFor("slice-reconciler"),
-		RecreateConditions: []controller.RecreateCondition{{Reason: "FailedToProvision"}, {Reason: "ProvisioningTimeout"}},
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		Recorder:                mgr.GetEventRecorderFor("slice-reconciler"),
+		RecreateConditions:      []controller.RecreateCondition{{Reason: "FailedToProvision"}, {Reason: "ProvisioningTimeout"}},
+		ConditionalRecreateWait: 0,
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 

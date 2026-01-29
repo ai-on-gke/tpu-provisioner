@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -24,6 +25,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
+
+var Now = time.Now
 
 // Finalizer to ensure Slices are cleaned up when JobSet is deleted
 const SliceCleanupFinalizer = "tpu-provisioner.cloud.google.com/slice-cleanup"
@@ -56,9 +59,10 @@ type RecreateCondition struct {
 
 type SliceReconciler struct {
 	client.Client
-	Recorder           record.EventRecorder
-	Scheme             *runtime.Scheme
-	RecreateConditions []RecreateCondition
+	Recorder                record.EventRecorder
+	Scheme                  *runtime.Scheme
+	RecreateConditions      []RecreateCondition
+	ConditionalRecreateWait time.Duration
 }
 
 func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -130,7 +134,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Determine which slices to delete and create
-	toDelete, toCreate := diffSlices(desiredSlices, existingSliceList.Items, r.RecreateConditions)
+	toDelete, toCreate, requeueAfter := diffSlices(desiredSlices, existingSliceList.Items, r.RecreateConditions, r.ConditionalRecreateWait)
 
 	// Delete slices that have changed
 	for _, slice := range toDelete {
@@ -147,7 +151,6 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Create new slices
-	var requeueAfter time.Duration
 	for _, slice := range toCreate {
 		skipped := false
 		// Check for overlap with existing Slices in the cluster using the index
@@ -360,7 +363,7 @@ func partitionsEqual(a, b []string) bool {
 // with a reason and optional message substring that matches one of the provided recreateConditionReasons.
 // When a slice needs to be deleted due to PartitionIds change or conditions,
 // it is NOT included in toCreate - the creation will happen in a subsequent reconciliation pass.
-func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateConditionReasons []RecreateCondition) (toDelete, toCreate []v1beta1.Slice) {
+func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateConditionReasons []RecreateCondition, conditionalRecreateWait time.Duration) (toDelete, toCreate []v1beta1.Slice, requeueAfter time.Duration) {
 	// Create a map of existing slices by name for quick lookup
 	existingMap := make(map[string]*v1beta1.Slice)
 	for i := range existing {
@@ -379,7 +382,13 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateCondi
 
 			// Check if slice needs recreation based on its status
 			if recreationReasonsMatch(existingSlice, recreateConditionReasons) {
-				toDelete = append(toDelete, *existingSlice)
+				if existingSlice.CreationTimestamp.Add(conditionalRecreateWait).Before(Now()) {
+					toDelete = append(toDelete, *existingSlice)
+				} else {
+					// Jitter between 1 and 3 seconds to prevent thundering herd.
+					jitter := time.Duration(1+rand.Intn(2)) * time.Second
+					requeueAfter = existingSlice.CreationTimestamp.Add(conditionalRecreateWait).Sub(Now()) + jitter
+				}
 				continue
 			}
 
@@ -390,7 +399,7 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateCondi
 		}
 	}
 
-	return toDelete, toCreate
+	return toDelete, toCreate, requeueAfter
 }
 
 func recreationReasonsMatch(slice *v1beta1.Slice, recreateConditions []RecreateCondition) bool {
