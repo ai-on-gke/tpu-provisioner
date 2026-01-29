@@ -65,6 +65,11 @@ type SliceReconciler struct {
 	ConditionalRecreateWait time.Duration
 }
 
+type diffedSlice struct {
+	slice  v1beta1.Slice
+	reason string
+}
+
 func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := ctrllog.FromContext(ctx)
 
@@ -135,23 +140,28 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Determine which slices to delete and create
 	toDelete, toCreate, requeueAfter := diffSlices(desiredSlices, existingSliceList.Items, r.RecreateConditions, r.ConditionalRecreateWait)
+	if requeueAfter > 0 {
+		log.Info("Some Slices need to be deleted, but are in a state that requires requeuing", "requeueAfter", requeueAfter)
+	}
 
 	// Delete slices that have changed
-	for _, slice := range toDelete {
+	for _, ds := range toDelete {
+		slice := ds.slice
 		if slice.DeletionTimestamp != nil {
-			log.Info("Skipping deletion of Slice due to NodeSelector change since the Slice is already marked for deletion", "slice", slice.Name)
+			log.Info("Skipping deletion of Slice since it is already marked for deletion", "slice", slice.Name, "reason", ds.reason)
 			continue
 		}
-		log.Info("Deleting Slice due to NodeSelector change", "slice", slice.Name)
+		log.Info("Deleting Slice", "slice", slice.Name, "reason", ds.reason)
 		if err := r.Delete(ctx, &slice); err != nil {
-			r.Recorder.Eventf(&js, corev1.EventTypeWarning, "SliceDeleteFailed", "Failed to delete Slice %s due to NodeSelector change: %v", slice.Name, err)
+			r.Recorder.Eventf(&js, corev1.EventTypeWarning, "SliceDeleteFailed", "Failed to delete Slice %s (reason: %s): %v", slice.Name, ds.reason, err)
 			return ctrl.Result{}, fmt.Errorf("deleting slice %s: %w", slice.Name, err)
 		}
-		r.Recorder.Eventf(&js, corev1.EventTypeNormal, "SliceDeleted", "Deleted Slice %s due to NodeSelector change", slice.Name)
+		r.Recorder.Eventf(&js, corev1.EventTypeNormal, "SliceDeleted", "Deleted Slice %s (reason: %s)", slice.Name, ds.reason)
 	}
 
 	// Create new slices
-	for _, slice := range toCreate {
+	for _, ds := range toCreate {
+		slice := ds.slice
 		skipped := false
 		// Check for overlap with existing Slices in the cluster using the index
 		for _, p := range slice.Spec.PartitionIds {
@@ -187,7 +197,7 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			r.Recorder.Eventf(&js, corev1.EventTypeWarning, "SliceCreateFailed", "Failed to create Slice %s: %v", slice.Name, err)
 			return ctrl.Result{}, fmt.Errorf("creating slice %s: %w", slice.Name, err)
 		}
-		r.Recorder.Eventf(&js, corev1.EventTypeNormal, "SliceCreated", "Created Slice %s", slice.Name)
+		r.Recorder.Eventf(&js, corev1.EventTypeNormal, "SliceCreated", "Created Slice %s (reason: %s)", slice.Name, ds.reason)
 	}
 
 	// Handle sync mode: suspend JobSet until all Slices are Ready
@@ -197,7 +207,11 @@ func (r *SliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	if requeueAfter > 0 {
+		log.Info("Requeueing JobSet", "requeueAfter", requeueAfter)
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+	return ctrl.Result{}, nil
 }
 
 const slicePartitionIdsField = "spec.partitionIds"
@@ -363,7 +377,7 @@ func partitionsEqual(a, b []string) bool {
 // with a reason and optional message substring that matches one of the provided recreateConditionReasons.
 // When a slice needs to be deleted due to PartitionIds change or conditions,
 // it is NOT included in toCreate - the creation will happen in a subsequent reconciliation pass.
-func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateConditionReasons []RecreateCondition, conditionalRecreateWait time.Duration) (toDelete, toCreate []v1beta1.Slice, requeueAfter time.Duration) {
+func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateConditionReasons []RecreateCondition, conditionalRecreateWait time.Duration) (toDelete, toCreate []diffedSlice, requeueAfter time.Duration) {
 	// Create a map of existing slices by name for quick lookup
 	existingMap := make(map[string]*v1beta1.Slice)
 	for i := range existing {
@@ -376,14 +390,14 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateCondi
 			// Slice exists - check if partitions have changed
 			if !partitionsEqual(existingSlice.Spec.PartitionIds, desiredSlice.Spec.PartitionIds) {
 				// NodeSelector changed - delete existing (creation will happen in next reconcile)
-				toDelete = append(toDelete, *existingSlice)
+				toDelete = append(toDelete, diffedSlice{slice: *existingSlice, reason: "partition IDs changed"})
 				continue
 			}
 
 			// Check if slice needs recreation based on its status
-			if recreationReasonsMatch(existingSlice, recreateConditionReasons) {
+			if reason, matches := recreationReasonsMatch(existingSlice, recreateConditionReasons); matches {
 				if existingSlice.CreationTimestamp.Add(conditionalRecreateWait).Before(Now()) {
-					toDelete = append(toDelete, *existingSlice)
+					toDelete = append(toDelete, diffedSlice{slice: *existingSlice, reason: fmt.Sprintf("recreation condition matched: %s", reason)})
 				} else {
 					// Jitter between 1 and 3 seconds to prevent thundering herd.
 					jitter := time.Duration(1+rand.Intn(2)) * time.Second
@@ -395,16 +409,16 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, recreateCondi
 			// Otherwise, slice matches - no action needed
 		} else {
 			// Slice doesn't exist - create it
-			toCreate = append(toCreate, desiredSlice)
+			toCreate = append(toCreate, diffedSlice{slice: desiredSlice, reason: "desired slice does not exist"})
 		}
 	}
 
 	return toDelete, toCreate, requeueAfter
 }
 
-func recreationReasonsMatch(slice *v1beta1.Slice, recreateConditions []RecreateCondition) bool {
+func recreationReasonsMatch(slice *v1beta1.Slice, recreateConditions []RecreateCondition) (string, bool) {
 	if len(recreateConditions) == 0 {
-		return false
+		return "", false
 	}
 
 	for _, cond := range slice.Status.Conditions {
@@ -412,14 +426,18 @@ func recreationReasonsMatch(slice *v1beta1.Slice, recreateConditions []RecreateC
 			if cond.Status == metav1.ConditionFalse || cond.Status == metav1.ConditionUnknown {
 				for _, r := range recreateConditions {
 					if cond.Reason == r.Reason && (r.MessageSubstring == "" || strings.Contains(cond.Message, r.MessageSubstring)) {
-						return true
+						reason := cond.Reason
+						if cond.Message != "" {
+							reason = fmt.Sprintf("%s: %s", cond.Reason, cond.Message)
+						}
+						return reason, true
 					}
 				}
 			}
 		}
 	}
 
-	return false
+	return "", false
 }
 
 func ParseRecreateConditions(raw []string) []RecreateCondition {
