@@ -91,6 +91,7 @@ type NodePoolRef struct {
 
 	CreatedForJobSet types.NamespacedName
 	Labels           map[string]string
+	SubblockName     string
 
 	Error   bool
 	Message string

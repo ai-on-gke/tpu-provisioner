@@ -195,12 +195,18 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 			labels = np.Config.Labels
 		}
 
+		var subblockName string
+		if np.Config != nil && np.Config.ReservationAffinity != nil && len(np.Config.ReservationAffinity.Values) > 0 {
+			subblockName = np.Config.ReservationAffinity.Values[0]
+		}
+
 		refs = append(refs, NodePoolRef{
 			Name:             np.Name,
 			Error:            np.Status == "ERROR",
 			Message:          np.StatusMessage,
 			CreatedForJobSet: createdForJobSet,
 			Labels:           labels,
+			SubblockName:     subblockName,
 		})
 	}
 
@@ -292,6 +298,7 @@ func (g *GKE) checkExistingNodePoolState(ctx context.Context, desired *container
 	if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
 		return nodePoolStateNotExists, nil
 	}
+
 	if existing != nil && existing.Status == "STOPPING" {
 		return nodePoolStateExistsAndStopping, nil
 	}
