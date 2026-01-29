@@ -21,7 +21,7 @@ webhooks:
   admissionReviewVersions: ["v1"]
   sideEffects: None
   rules:
-  - operations: ["CREATE"]
+  - operations: ["CREATE", "UPDATE"]
     apiGroups: ["batch"]
     apiVersions: ["v1"]
     resources: ["jobs"]
