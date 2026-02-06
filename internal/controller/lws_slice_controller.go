@@ -156,17 +156,15 @@ func (r *LeaderWorkerSetSliceReconciler) sliceToLWSRequests(ctx context.Context,
 	}
 }
 
+type lwsReplicaSelection struct {
+	Leader  []string   `json:"leader"`
+	Workers [][]string `json:"workers"`
+}
+
+type lwsSliceSelection []lwsReplicaSelection
+
 func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 	var slices []v1beta1.Slice
-
-	nodeSelector := lwset.Spec.LeaderWorkerTemplate.WorkerTemplate.Spec.NodeSelector
-	accel := nodeSelector[acceleratorSelector]
-	topo := lwset.Spec.LeaderWorkerTemplate.WorkerTemplate.Annotations[topologyAnnotation]
-
-	replicas := 1
-	if lwset.Spec.Replicas != nil {
-		replicas = int(*lwset.Spec.Replicas)
-	}
 
 	// Parse slice selection annotation if present
 	selection, err := parseLWSSliceSelection(lwset)
@@ -174,45 +172,104 @@ func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 		return nil, fmt.Errorf("parsing slice selection: %w", err)
 	}
 
-	for i := 0; i < replicas; i++ {
-		var partitionIds []string
-		if s, ok := selection[lwset.Name]; ok && i < len(s) {
-			partitionIds = s[i]
-		}
+	replicas := 1
+	if lwset.Spec.Replicas != nil {
+		replicas = int(*lwset.Spec.Replicas)
+	}
 
-		s := v1beta1.Slice{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.LWSSliceName(lwset.Name, string(lwset.UID), i),
-				Labels: map[string]string{
-					SliceOwnerKindLabel:      LWSOwnerKind,
-					SliceOwnerNameLabel:      lwset.Name,
-					SliceOwnerNamespaceLabel: lwset.Namespace,
-				},
-			},
-			Spec: v1beta1.SliceSpec{
-				Type:         v1beta1.Type(accel),
-				Topology:     topo,
-				PartitionIds: partitionIds,
-			},
+	// Global Leader Slice
+	// LWS groups all leader pods (worker-index 0) into a single StatefulSet.
+	if template := lwset.Spec.LeaderWorkerTemplate.LeaderTemplate; template != nil {
+		nodeSelector := template.Spec.NodeSelector
+		accel := nodeSelector[acceleratorSelector]
+		topo := template.Annotations[topologyAnnotation]
+
+		if accel == tpu7xAccelerator || accel == tpuV7xAccelerator {
+			var partitionIds []string
+			for i := 0; i < len(selection); i++ {
+				partitionIds = append(partitionIds, selection[i].Leader...)
+			}
+
+			if len(partitionIds) > 0 {
+				slices = append(slices, v1beta1.Slice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: utils.LWSSliceName(lwset.Name, string(lwset.UID), "leader", -1),
+						Labels: map[string]string{
+							SliceOwnerKindLabel:      LWSOwnerKind,
+							SliceOwnerNameLabel:      lwset.Name,
+							SliceOwnerNamespaceLabel: lwset.Namespace,
+						},
+					},
+					Spec: v1beta1.SliceSpec{
+						Type:         v1beta1.Type(accel),
+						Topology:     topo,
+						PartitionIds: partitionIds,
+					},
+				})
+			}
 		}
-		slices = append(slices, s)
+	}
+
+	for i := 0; i < replicas; i++ {
+		// Worker template
+		// LWS groups worker pods for each replica into a per-replica StatefulSet.
+		template := lwset.Spec.LeaderWorkerTemplate.WorkerTemplate
+		nodeSelector := template.Spec.NodeSelector
+		accel := nodeSelector[acceleratorSelector]
+		topo := template.Annotations[topologyAnnotation]
+
+		if accel == tpu7xAccelerator || accel == tpuV7xAccelerator {
+			var partitionIds []string
+			if i < len(selection) {
+				for _, w := range selection[i].Workers {
+					partitionIds = append(partitionIds, w...)
+				}
+			}
+
+			if len(partitionIds) > 0 {
+				slices = append(slices, v1beta1.Slice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: utils.LWSSliceName(lwset.Name, string(lwset.UID), "worker", i),
+						Labels: map[string]string{
+							SliceOwnerKindLabel:      LWSOwnerKind,
+							SliceOwnerNameLabel:      lwset.Name,
+							SliceOwnerNamespaceLabel: lwset.Namespace,
+						},
+					},
+					Spec: v1beta1.SliceSpec{
+						Type:         v1beta1.Type(accel),
+						Topology:     topo,
+						PartitionIds: partitionIds,
+					},
+				})
+			}
+		}
 	}
 
 	return slices, nil
 }
 
-func parseLWSSliceSelection(lwset *lws.LeaderWorkerSet) (map[string][][]string, error) {
+// parseLWSSliceSelection returns the slice selection from the annotation.
+// The expected format is a JSON array of objects, one per replica:
+//
+//	[
+//	  {
+//	    "leader": ["cube-1", "cube-2"],
+//	    "workers": [["cube-3", "cube-4"], ["cube-5", "cube-6"]]
+//	  }
+//	]
+func parseLWSSliceSelection(lwset *lws.LeaderWorkerSet) (lwsSliceSelection, error) {
+	var selection lwsSliceSelection
 	if lwset.Annotations == nil {
-		return nil, nil
+		return selection, nil
 	}
 	val, ok := lwset.Annotations[SliceSelectionAnnotation]
 	if !ok {
-		return nil, nil
+		return selection, nil
 	}
 
-	var selection map[string][][]string
 	if err := json.Unmarshal([]byte(val), &selection); err != nil {
-		return nil, fmt.Errorf("slice selection should be of the format '{\"<lws-name>\": [[\"cube-1\", \"cube-2\"], [...]]}': %w", err)
+		return selection, fmt.Errorf("slice selection should be of the format '[{\"leader\": [\"cube-1\", \"cube-2\"], \"workers\": [[...]]}]': %w", err)
 	}
 
 	return selection, nil

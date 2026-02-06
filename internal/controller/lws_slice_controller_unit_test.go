@@ -25,7 +25,7 @@ func TestLWSSlices(t *testing.T) {
 		errSubstr string
 	}{
 		{
-			name: "basic LeaderWorkerSet with single replica",
+			name: "basic LeaderWorkerSet with single replica (no slices should be created)",
 			lwset: &lws.LeaderWorkerSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-lws",
@@ -49,13 +49,11 @@ func TestLWSSlices(t *testing.T) {
 					},
 				},
 			},
-			want: []v1beta1.Slice{
-				makeLWSSlice("lws-test-lws-test-uid-0", tpu7xAccelerator, "4x4x4", "test-lws", "default", string(testUID)),
-			},
+			want:    nil,
 			wantErr: false,
 		},
 		{
-			name: "LeaderWorkerSet with multiple replicas",
+			name: "LeaderWorkerSet with multiple replicas (no slices should be created)",
 			lwset: &lws.LeaderWorkerSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-lws",
@@ -80,11 +78,7 @@ func TestLWSSlices(t *testing.T) {
 					},
 				},
 			},
-			want: []v1beta1.Slice{
-				makeLWSSlice("lws-test-lws-test-uid-0", tpu7xAccelerator, "4x4x4", "test-lws", "default", string(testUID)),
-				makeLWSSlice("lws-test-lws-test-uid-1", tpu7xAccelerator, "4x4x4", "test-lws", "default", string(testUID)),
-				makeLWSSlice("lws-test-lws-test-uid-2", tpu7xAccelerator, "4x4x4", "test-lws", "default", string(testUID)),
-			},
+			want:    nil,
 			wantErr: false,
 		},
 		{
@@ -95,7 +89,7 @@ func TestLWSSlices(t *testing.T) {
 					Namespace: "default",
 					UID:       testUID,
 					Annotations: map[string]string{
-						SliceSelectionAnnotation: `{"test-lws":[["cube-1","cube-2"],["cube-3","cube-4"]]}`,
+						SliceSelectionAnnotation: `[{"workers":[["cube-1","cube-2"]]},{"workers":[["cube-3","cube-4"]]}]`,
 					},
 				},
 				Spec: lws.LeaderWorkerSetSpec{
@@ -117,8 +111,55 @@ func TestLWSSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeLWSSlice("lws-test-lws-test-uid-0", tpuV7xAccelerator, "4x4x8", "test-lws", "default", string(testUID), "cube-1", "cube-2"),
-				makeLWSSlice("lws-test-lws-test-uid-1", tpuV7xAccelerator, "4x4x8", "test-lws", "default", string(testUID), "cube-3", "cube-4"),
+				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpuV7xAccelerator, "4x4x8", "test-lws", "default", "cube-1", "cube-2"),
+				makeLWSSlice("lws-test-lws-test-uid-worker-1", tpuV7xAccelerator, "4x4x8", "test-lws", "default", "cube-3", "cube-4"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "LeaderWorkerSet with leader and worker slices",
+			lwset: &lws.LeaderWorkerSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-lws",
+					Namespace: "default",
+					UID:       testUID,
+					Annotations: map[string]string{
+						SliceSelectionAnnotation: `[{"leader":["cube-0"],"workers":[["cube-1","cube-2"]]}]`,
+					},
+				},
+				Spec: lws.LeaderWorkerSetSpec{
+					Replicas: func(i int32) *int32 { return &i }(1),
+					LeaderWorkerTemplate: lws.LeaderWorkerTemplate{
+						LeaderTemplate: &corev1.PodTemplateSpec{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									topologyAnnotation: "4x4x1",
+								},
+							},
+							Spec: corev1.PodSpec{
+								NodeSelector: map[string]string{
+									acceleratorSelector: tpu7xAccelerator,
+								},
+							},
+						},
+						WorkerTemplate: corev1.PodTemplateSpec{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									topologyAnnotation: "4x4x4",
+								},
+							},
+							Spec: corev1.PodSpec{
+								NodeSelector: map[string]string{
+									acceleratorSelector: tpu7xAccelerator,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: []v1beta1.Slice{
+				makeLWSSlice("lws-test-lws-test-uid-leader", tpu7xAccelerator, "4x4x1", "test-lws", "default", "cube-0"),
+				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpu7xAccelerator, "4x4x4", "test-lws", "default", "cube-1", "cube-2"),
 			},
 			wantErr: false,
 		},
@@ -130,7 +171,7 @@ func TestLWSSlices(t *testing.T) {
 					Namespace: "default",
 					UID:       testUID,
 					Annotations: map[string]string{
-						SliceSelectionAnnotation: `{"test-lws": invalid}`,
+						SliceSelectionAnnotation: `{"worker": invalid}`,
 					},
 				},
 				Spec: lws.LeaderWorkerSetSpec{
@@ -180,7 +221,7 @@ func TestParseLWSSliceSelection(t *testing.T) {
 	tests := []struct {
 		name      string
 		lwset     *lws.LeaderWorkerSet
-		want      map[string][][]string
+		want      lwsSliceSelection
 		wantErr   bool
 		errSubstr string
 	}{
@@ -202,14 +243,22 @@ func TestParseLWSSliceSelection(t *testing.T) {
 					Name:      "test-lws",
 					Namespace: "default",
 					Annotations: map[string]string{
-						SliceSelectionAnnotation: `{"test-lws":[["cube-1","cube-2"],["cube-3","cube-4"]]}`,
+						SliceSelectionAnnotation: `[{"leader":["cube-0"],"workers":[["cube-1","cube-2"]]},{"leader":["cube-3"],"workers":[["cube-4","cube-5"]]}]`,
 					},
 				},
 			},
-			want: map[string][][]string{
-				"test-lws": {
-					{"cube-1", "cube-2"},
-					{"cube-3", "cube-4"},
+			want: lwsSliceSelection{
+				{
+					Leader: []string{"cube-0"},
+					Workers: [][]string{
+						{"cube-1", "cube-2"},
+					},
+				},
+				{
+					Leader: []string{"cube-3"},
+					Workers: [][]string{
+						{"cube-4", "cube-5"},
+					},
 				},
 			},
 			wantErr: false,
@@ -221,11 +270,11 @@ func TestParseLWSSliceSelection(t *testing.T) {
 					Name:      "test-lws",
 					Namespace: "default",
 					Annotations: map[string]string{
-						SliceSelectionAnnotation: `{"test-lws": invalid}`,
+						SliceSelectionAnnotation: `{"worker": invalid}`,
 					},
 				},
 			},
-			want:      nil,
+			want:      lwsSliceSelection{},
 			wantErr:   true,
 			errSubstr: "slice selection should be of the format",
 		},
@@ -321,7 +370,7 @@ func TestSliceToLWSRequests(t *testing.T) {
 }
 
 // Helper to make a Slice for LWS tests
-func makeLWSSlice(name, accel, topology, lwsName, lwsNamespace, lwsUID string, partitions ...string) v1beta1.Slice {
+func makeLWSSlice(name, accel, topology, lwsName, lwsNamespace string, partitions ...string) v1beta1.Slice {
 	return v1beta1.Slice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,

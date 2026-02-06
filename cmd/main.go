@@ -311,7 +311,7 @@ func main() {
 		}
 		mgr.GetWebhookServer().Register("/mutate", &webhook.Admission{Handler: jobWebhook})
 
-		lwsWebhook := &jobwebhook.LWSPodMutationHandler{
+		lwsWebhook := &jobwebhook.LWSStatefulSetMutationHandler{
 			Decoder: admission.NewDecoder(scheme),
 		}
 		mgr.GetWebhookServer().Register("/mutate-lws", &webhook.Admission{Handler: lwsWebhook})

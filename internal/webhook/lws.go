@@ -8,56 +8,46 @@ import (
 	"strconv"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
-	corev1 "k8s.io/api/core/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 const (
-	LWSNameLabel    = "leaderworkerset.sigs.k8s.io/name"
-	LWSReplicaLabel = "leaderworkerset.sigs.k8s.io/replica-index"
+	LWSNameLabel       = "leaderworkerset.sigs.k8s.io/name"
+	LWSGroupIndexLabel = "leaderworkerset.sigs.k8s.io/group-index"
 )
 
-// LWSPodMutationHandler handles admission requests for Pod mutations belonging to an LWS
-type LWSPodMutationHandler struct {
+// LWSStatefulSetMutationHandler handles admission requests for StatefulSet mutations belonging to an LWS
+type LWSStatefulSetMutationHandler struct {
 	Decoder admission.Decoder
 }
 
 // Handle processes the admission request
-func (h *LWSPodMutationHandler) Handle(ctx context.Context, req admission.Request) admission.Response {
-	// Decode the Pod object
-	pod := &corev1.Pod{}
-	if err := h.Decoder.Decode(req, pod); err != nil {
-		log.Error(err, "failed to decode pod")
+func (h *LWSStatefulSetMutationHandler) Handle(ctx context.Context, req admission.Request) admission.Response {
+	// Decode the StatefulSet object
+	sts := &appsv1.StatefulSet{}
+	if err := h.Decoder.Decode(req, sts); err != nil {
+		log.Error(err, "failed to decode statefulset")
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
-	if pod.Labels == nil {
-		return admission.Allowed("missing pod labels")
+	if sts.Labels == nil {
+		return admission.Allowed("missing statefulset labels")
 	}
 
 	// Double check if we should inject
-	if pod.Labels[InjectSliceSelectorLabel] != "true" {
+	if sts.Labels[InjectSliceSelectorLabel] != "true" {
 		return admission.Allowed("inject-slice-selector label not set to true")
 	}
 
-	lwsName := pod.Labels[LWSNameLabel]
+	lwsName := sts.Labels[LWSNameLabel]
 	if lwsName == "" {
 		return admission.Allowed("missing LWS name label")
 	}
 
-	replicaStr := pod.Labels[LWSReplicaLabel]
-	if replicaStr == "" {
-		return admission.Allowed("missing LWS replica label")
-	}
-
-	replica, err := strconv.Atoi(replicaStr)
-	if err != nil {
-		return admission.Errored(http.StatusBadRequest, fmt.Errorf("unable to parse LWS replica index: %w", err))
-	}
-
 	// Get LWS UID from OwnerReferences
 	var lwsUID string
-	for _, ref := range pod.OwnerReferences {
+	for _, ref := range sts.OwnerReferences {
 		if ref.Kind == "LeaderWorkerSet" {
 			lwsUID = string(ref.UID)
 			break
@@ -65,38 +55,45 @@ func (h *LWSPodMutationHandler) Handle(ctx context.Context, req admission.Reques
 	}
 
 	if lwsUID == "" {
-		// If not directly owned by LWS, it might be owned by a ReplicaSet which is owned by LWS?
-		// Actually LWS manages Pods. Let's assume direct ownership for now or check if we can skip UID if name is unique enough (but UID is better).
-		// Wait, if it's a worker pod, it might be owned by something else.
-		// Actually LWS documentation says "The workers are created as Pods".
 		return admission.Allowed("missing LeaderWorkerSet owner reference")
 	}
 
-	if pod.Spec.NodeSelector == nil {
-		pod.Spec.NodeSelector = make(map[string]string)
+	if sts.Spec.Template.Spec.NodeSelector == nil {
+		sts.Spec.Template.Spec.NodeSelector = make(map[string]string)
 	}
 
-	key, val := SliceNodeSelector, utils.LWSSliceName(lwsName, lwsUID, replica)
-	pod.Spec.NodeSelector[key] = val
+	replica := -1
+	component := "leader"
+	if groupIndexStr, ok := sts.Labels[LWSGroupIndexLabel]; ok {
+		var err error
+		replica, err = strconv.Atoi(groupIndexStr)
+		if err != nil {
+			return admission.Errored(http.StatusBadRequest, fmt.Errorf("unable to parse LWS group index: %w", err))
+		}
+		component = "worker"
+	}
 
-	log.Info("added node selector to pod",
+	key, val := SliceNodeSelector, utils.LWSSliceName(lwsName, lwsUID, component, replica)
+	sts.Spec.Template.Spec.NodeSelector[key] = val
+
+	log.Info("added node selector to statefulset",
 		"namespace", req.Namespace,
-		"name", pod.Name,
+		"name", sts.Name,
 		"key", key, "val", val)
 
-	// Marshal the modified pod
-	marshaledPod, err := json.Marshal(pod)
+	// Marshal the modified statefulset
+	marshaledSts, err := json.Marshal(sts)
 	if err != nil {
-		log.Error(err, "failed to marshal modified pod")
+		log.Error(err, "failed to marshal modified statefulset")
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
 	// Return patch response
-	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledSts)
 }
 
 // InjectDecoder injects the decoder
-func (h *LWSPodMutationHandler) InjectDecoder(d admission.Decoder) error {
+func (h *LWSStatefulSetMutationHandler) InjectDecoder(d admission.Decoder) error {
 	h.Decoder = d
 	return nil
 }
