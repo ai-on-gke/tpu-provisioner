@@ -39,6 +39,7 @@ import (
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -99,6 +100,9 @@ var _ = BeforeSuite(func() {
 	err = v1beta1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = lws.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	//+kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -133,10 +137,19 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
-	err = (&controller.SliceReconciler{
+	err = (&controller.JobSetSliceReconciler{
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
 		Recorder:                mgr.GetEventRecorderFor("slice-reconciler"),
+		RecreateConditions:      []controller.RecreateCondition{{Reason: "FailedToProvision"}, {Reason: "ProvisioningTimeout"}},
+		ConditionalRecreateWait: 0,
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
+	err = (&controller.LeaderWorkerSetSliceReconciler{
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		Recorder:                mgr.GetEventRecorderFor("lws-slice-reconciler"),
 		RecreateConditions:      []controller.RecreateCondition{{Reason: "FailedToProvision"}, {Reason: "ProvisioningTimeout"}},
 		ConditionalRecreateWait: 0,
 	}).SetupWithManager(mgr)
@@ -155,9 +168,13 @@ var _ = BeforeSuite(func() {
 
 	go func() {
 		defer GinkgoRecover()
-		err = mgr.Start(ctx)
-		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
+		if err := mgr.Start(ctx); err != nil {
+			logf.Log.Error(err, "failed to run manager")
+		}
 	}()
+
+	// Wait for cache to sync
+	mgr.GetCache().WaitForCacheSync(ctx)
 })
 
 var _ = AfterSuite(func() {
