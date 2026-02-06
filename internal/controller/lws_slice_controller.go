@@ -24,13 +24,6 @@ import (
 	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 )
 
-// Finalizer to ensure Slices are cleaned up when LWS is deleted
-const LWSSliceCleanupFinalizer = "tpu-provisioner.cloud.google.com/lws-slice-cleanup"
-
-const (
-// Removed lwsOwnerKind, now in slice_shared.go as LWSOwnerKind
-)
-
 type LeaderWorkerSetSliceReconciler struct {
 	client.Client
 	Recorder                record.EventRecorder
@@ -80,9 +73,9 @@ func (r *LeaderWorkerSetSliceReconciler) Reconcile(ctx context.Context, req ctrl
 			}
 		}
 
-		if controllerutil.ContainsFinalizer(&lwset, LWSSliceCleanupFinalizer) {
-			log.Info("Removing finalizer from LeaderWorkerSet", "finalizer", LWSSliceCleanupFinalizer)
-			controllerutil.RemoveFinalizer(&lwset, LWSSliceCleanupFinalizer)
+		if controllerutil.ContainsFinalizer(&lwset, SliceCleanupFinalizer) {
+			log.Info("Removing finalizer from LeaderWorkerSet", "finalizer", SliceCleanupFinalizer)
+			controllerutil.RemoveFinalizer(&lwset, SliceCleanupFinalizer)
 			if err := r.Update(ctx, &lwset); err != nil {
 				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 			}
@@ -91,9 +84,9 @@ func (r *LeaderWorkerSetSliceReconciler) Reconcile(ctx context.Context, req ctrl
 	}
 
 	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(&lwset, LWSSliceCleanupFinalizer) {
-		log.Info("Adding finalizer to LeaderWorkerSet", "finalizer", LWSSliceCleanupFinalizer)
-		controllerutil.AddFinalizer(&lwset, LWSSliceCleanupFinalizer)
+	if !controllerutil.ContainsFinalizer(&lwset, SliceCleanupFinalizer) {
+		log.Info("Adding finalizer to LeaderWorkerSet", "finalizer", SliceCleanupFinalizer)
+		controllerutil.AddFinalizer(&lwset, SliceCleanupFinalizer)
 		if err := r.Update(ctx, &lwset); err != nil {
 			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
 		}

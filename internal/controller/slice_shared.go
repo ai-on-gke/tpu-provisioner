@@ -15,6 +15,8 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+var Now = time.Now
+
 // Labels used to track which resource (i.e. JobSet, LWS) owns a Slice
 // since Cluster scopred resources cannot use owner references to Namespaced resources.
 const (
@@ -24,10 +26,11 @@ const (
 )
 
 const (
-	JobSetOwnerKind = "jobset"
+	jobSetOwnerKind = "jobset"
 	LWSOwnerKind    = "LeaderWorkerSet"
 )
 
+const SliceCleanupFinalizer = "tpu-provisioner.cloud.google.com/slice-cleanup"
 const SliceSelectionAnnotation = "tpu-provisioner.cloud.google.com/slice-selection"
 const slicePartitionIdsField = "spec.partitionIds"
 

@@ -286,7 +286,7 @@ func TestSliceToLWSRequests(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-slice",
 					Labels: map[string]string{
-						SliceOwnerKindLabel:      JobSetOwnerKind,
+						SliceOwnerKindLabel:      jobSetOwnerKind,
 						SliceOwnerNameLabel:      "test-jobset",
 						SliceOwnerNamespaceLabel: "default",
 					},

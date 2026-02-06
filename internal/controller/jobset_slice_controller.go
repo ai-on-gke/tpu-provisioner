@@ -24,15 +24,6 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
-var Now = time.Now
-
-// Finalizer to ensure Slices are cleaned up when JobSet is deleted
-const SliceCleanupFinalizer = "tpu-provisioner.cloud.google.com/slice-cleanup"
-
-const (
-// Removed jobsetOwnerKind, now in slice_shared.go as JobSetOwnerKind
-)
-
 type JobSetSliceReconciler struct {
 	client.Client
 	Recorder                record.EventRecorder
@@ -61,7 +52,7 @@ func (r *JobSetSliceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	var existingSliceList v1beta1.SliceList
 	if err := r.List(ctx, &existingSliceList,
 		client.MatchingLabels{
-			SliceOwnerKindLabel:      JobSetOwnerKind,
+			SliceOwnerKindLabel:      jobSetOwnerKind,
 			SliceOwnerNameLabel:      js.Name,
 			SliceOwnerNamespaceLabel: js.Namespace,
 		}); err != nil {
@@ -138,8 +129,6 @@ func (r *JobSetSliceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-// Removed slicePartitionIdsField, now in slice_shared.go
-
 func (r *JobSetSliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Register index for PartitionIds to allow quick lookup of slices by partition
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1beta1.Slice{}, slicePartitionIdsField, func(rawObj client.Object) []string {
@@ -183,7 +172,7 @@ func (r *JobSetSliceReconciler) sliceToJobSetRequests(ctx context.Context, obj c
 	jobsetName, hasName := slice.Labels[SliceOwnerNameLabel]
 	jobsetNamespace, hasNamespace := slice.Labels[SliceOwnerNamespaceLabel]
 
-	if ownerKind != JobSetOwnerKind || !hasName || !hasNamespace {
+	if ownerKind != jobSetOwnerKind || !hasName || !hasNamespace {
 		return nil
 	}
 
@@ -234,7 +223,7 @@ func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, error) {
 					Name: utils.SliceName(js.Name, string(js.UID), rj.Name, i),
 					Labels: map[string]string{
 						// Track ownership with labels (can't use owner references since Slice is Cluster scoped)
-						SliceOwnerKindLabel:      JobSetOwnerKind,
+						SliceOwnerKindLabel:      jobSetOwnerKind,
 						SliceOwnerNameLabel:      js.Name,
 						SliceOwnerNamespaceLabel: js.Namespace,
 					},
