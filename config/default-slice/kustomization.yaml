@@ -29,3 +29,16 @@ patchesJson6902:
         - slices/status
         verbs:
         - get
+    - op: add
+      path: /rules/-
+      value:
+        apiGroups:
+        - leaderworkerset.x-k8s.io
+        resources:
+        - leaderworkersets
+        verbs:
+        - get
+        - list
+        - watch
+        - patch
+        - update
