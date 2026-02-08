@@ -50,7 +50,7 @@ webhooks:
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: lws
+  name: lws-statefulsets
   annotations:
     cert-manager.io/inject-ca-from: tpu-provisioner-system/tpu-provisioner-webhook-server
 webhooks:

@@ -25,7 +25,7 @@ func TestLWSSlices(t *testing.T) {
 		errSubstr string
 	}{
 		{
-			name: "basic LeaderWorkerSet with single replica (no slices should be created)",
+			name: "basic LeaderWorkerSet with single replica",
 			lwset: &lws.LeaderWorkerSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-lws",
@@ -49,11 +49,13 @@ func TestLWSSlices(t *testing.T) {
 					},
 				},
 			},
-			want:    nil,
+			want: []v1beta1.Slice{
+				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpu7xAccelerator, "4x4x4", "test-lws", "default"),
+			},
 			wantErr: false,
 		},
 		{
-			name: "LeaderWorkerSet with multiple replicas (no slices should be created)",
+			name: "LeaderWorkerSet with multiple replicas",
 			lwset: &lws.LeaderWorkerSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-lws",
@@ -78,7 +80,11 @@ func TestLWSSlices(t *testing.T) {
 					},
 				},
 			},
-			want:    nil,
+			want: []v1beta1.Slice{
+				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpu7xAccelerator, "4x4x4", "test-lws", "default"),
+				makeLWSSlice("lws-test-lws-test-uid-worker-1", tpu7xAccelerator, "4x4x4", "test-lws", "default"),
+				makeLWSSlice("lws-test-lws-test-uid-worker-2", tpu7xAccelerator, "4x4x4", "test-lws", "default"),
+			},
 			wantErr: false,
 		},
 		{
@@ -133,7 +139,7 @@ func TestLWSSlices(t *testing.T) {
 						LeaderTemplate: &corev1.PodTemplateSpec{
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
-									topologyAnnotation: "4x4x1",
+									topologyAnnotation: "4x4x4",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -145,7 +151,7 @@ func TestLWSSlices(t *testing.T) {
 						WorkerTemplate: corev1.PodTemplateSpec{
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
-									topologyAnnotation: "4x4x4",
+									topologyAnnotation: "4x4x8",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -158,8 +164,8 @@ func TestLWSSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeLWSSlice("lws-test-lws-test-uid-leader", tpu7xAccelerator, "4x4x1", "test-lws", "default", "cube-0"),
-				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpu7xAccelerator, "4x4x4", "test-lws", "default", "cube-1", "cube-2"),
+				makeLWSSlice("lws-test-lws-test-uid-leader", tpu7xAccelerator, "4x4x4", "test-lws", "default", "cube-0"),
+				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpu7xAccelerator, "4x4x8", "test-lws", "default", "cube-1", "cube-2"),
 			},
 			wantErr: false,
 		},

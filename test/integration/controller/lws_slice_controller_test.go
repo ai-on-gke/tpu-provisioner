@@ -54,7 +54,7 @@ var _ = Describe("LeaderWorkerSet Slice controller", func() {
 		Entry("LWS with slice provisioning enabled should create Slices", &testCase{
 			lwset: constructLWS("test-lws-1",
 				withLWSLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
-				withLWSAnnotation(controller.SliceSelectionAnnotation, `{"test-lws-1":[["lws-cube-1"]]}`),
+				withLWSAnnotation(controller.SliceSelectionAnnotation, `[{"workers":[["lws-cube-1"]]}]`),
 				withLWSTPU("tpu7x", "4x4x4"),
 				withLWSTemplates(1),
 			),

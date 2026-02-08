@@ -190,23 +190,21 @@ func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 				partitionIds = append(partitionIds, selection[i].Leader...)
 			}
 
-			if len(partitionIds) > 0 {
-				slices = append(slices, v1beta1.Slice{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: utils.LWSSliceName(lwset.Name, string(lwset.UID), "leader", -1),
-						Labels: map[string]string{
-							SliceOwnerKindLabel:      LWSOwnerKind,
-							SliceOwnerNameLabel:      lwset.Name,
-							SliceOwnerNamespaceLabel: lwset.Namespace,
-						},
+			slices = append(slices, v1beta1.Slice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: utils.LWSSliceName(lwset.Name, string(lwset.UID), "leader", -1),
+					Labels: map[string]string{
+						SliceOwnerKindLabel:      LWSOwnerKind,
+						SliceOwnerNameLabel:      lwset.Name,
+						SliceOwnerNamespaceLabel: lwset.Namespace,
 					},
-					Spec: v1beta1.SliceSpec{
-						Type:         v1beta1.Type(accel),
-						Topology:     topo,
-						PartitionIds: partitionIds,
-					},
-				})
-			}
+				},
+				Spec: v1beta1.SliceSpec{
+					Type:         v1beta1.Type(accel),
+					Topology:     topo,
+					PartitionIds: partitionIds,
+				},
+			})
 		}
 	}
 
@@ -226,23 +224,21 @@ func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 				}
 			}
 
-			if len(partitionIds) > 0 {
-				slices = append(slices, v1beta1.Slice{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: utils.LWSSliceName(lwset.Name, string(lwset.UID), "worker", i),
-						Labels: map[string]string{
-							SliceOwnerKindLabel:      LWSOwnerKind,
-							SliceOwnerNameLabel:      lwset.Name,
-							SliceOwnerNamespaceLabel: lwset.Namespace,
-						},
+			slices = append(slices, v1beta1.Slice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: utils.LWSSliceName(lwset.Name, string(lwset.UID), "worker", i),
+					Labels: map[string]string{
+						SliceOwnerKindLabel:      LWSOwnerKind,
+						SliceOwnerNameLabel:      lwset.Name,
+						SliceOwnerNamespaceLabel: lwset.Namespace,
 					},
-					Spec: v1beta1.SliceSpec{
-						Type:         v1beta1.Type(accel),
-						Topology:     topo,
-						PartitionIds: partitionIds,
-					},
-				})
-			}
+				},
+				Spec: v1beta1.SliceSpec{
+					Type:         v1beta1.Type(accel),
+					Topology:     topo,
+					PartitionIds: partitionIds,
+				},
+			})
 		}
 	}
 
