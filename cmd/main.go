@@ -306,13 +306,19 @@ func main() {
 
 	if enableWebhooks {
 		// Register webhook handlers
-		jobWebhook := &jobwebhook.JobMutationHandler{
-			Decoder: admission.NewDecoder(scheme),
+		jobWebhook := &jobwebhook.LoggingHandler{
+			Name: "job",
+			Handler: &jobwebhook.JobMutationHandler{
+				Decoder: admission.NewDecoder(scheme),
+			},
 		}
 		mgr.GetWebhookServer().Register("/mutate", &webhook.Admission{Handler: jobWebhook})
 
-		lwsWebhook := &jobwebhook.LWSStatefulSetMutationHandler{
-			Decoder: admission.NewDecoder(scheme),
+		lwsWebhook := &jobwebhook.LoggingHandler{
+			Name: "lws",
+			Handler: &jobwebhook.LWSStatefulSetMutationHandler{
+				Decoder: admission.NewDecoder(scheme),
+			},
 		}
 		mgr.GetWebhookServer().Register("/mutate-lws", &webhook.Admission{Handler: lwsWebhook})
 	}

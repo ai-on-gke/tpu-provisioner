@@ -24,10 +24,10 @@ type LWSStatefulSetMutationHandler struct {
 
 // Handle processes the admission request
 func (h *LWSStatefulSetMutationHandler) Handle(ctx context.Context, req admission.Request) admission.Response {
+
 	// Decode the StatefulSet object
 	sts := &appsv1.StatefulSet{}
 	if err := h.Decoder.Decode(req, sts); err != nil {
-		log.Error(err, "failed to decode statefulset")
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
@@ -79,24 +79,12 @@ func (h *LWSStatefulSetMutationHandler) Handle(ctx context.Context, req admissio
 	key, val := SliceNodeSelector, utils.LWSSliceName(lwsName, lwsUID, component, replica)
 	sts.Spec.Template.Spec.NodeSelector[key] = val
 
-	log.Info("added node selector to statefulset",
-		"namespace", req.Namespace,
-		"name", sts.Name,
-		"key", key, "val", val)
-
 	// Marshal the modified statefulset
 	marshaledSts, err := json.Marshal(sts)
 	if err != nil {
-		log.Error(err, "failed to marshal modified statefulset")
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
 	// Return patch response
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledSts)
-}
-
-// InjectDecoder injects the decoder
-func (h *LWSStatefulSetMutationHandler) InjectDecoder(d admission.Decoder) error {
-	h.Decoder = d
-	return nil
 }
