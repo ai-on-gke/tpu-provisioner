@@ -25,21 +25,31 @@ func (h *LoggingHandler) Handle(ctx context.Context, req admission.Request) admi
 
 	resp := h.Handler.Handle(ctx, req)
 
+	var msg, reason string
+	if resp.Result != nil {
+		msg = resp.Result.Message
+		reason = string(resp.Result.Reason)
+	}
 	if !resp.Allowed {
 		log.Error(nil, "admission request denied",
 			"webhook", h.Name,
 			"namespace", req.Namespace,
 			"name", req.Name,
-			"reason", resp.Result.Reason,
-			"message", resp.Result.Message,
+			"reason", reason,
+			"message", msg,
 		)
 	} else {
+		var msg, reason string
+		if resp.Result != nil {
+			msg = resp.Result.Message
+			reason = string(resp.Result.Reason)
+		}
 		log.Info("admission request allowed",
 			"webhook", h.Name,
 			"namespace", req.Namespace,
 			"name", req.Name,
-			"reason", resp.Result.Reason,
-			"message", resp.Result.Message,
+			"reason", reason,
+			"message", msg,
 			"patchType", resp.PatchType,
 		)
 	}
