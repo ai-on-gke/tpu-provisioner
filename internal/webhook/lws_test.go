@@ -49,7 +49,8 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 					Name:      "test-sts-worker",
 					Namespace: "default",
 					Labels: map[string]string{
-						LWSNameLabel:       "test-lws",
+						LWSNameLabel: "test-lws",
+						// Presence of LWSGroupIndexLabel denotes a worker
 						LWSGroupIndexLabel: "1",
 					},
 					OwnerReferences: []metav1.OwnerReference{
@@ -73,13 +74,14 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 			expectedVal:    utils.LWSSliceName("test-lws", "lws-uid-12345", "worker", 1),
 		},
 		{
-			name: "should mutate worker sts with correct labels even if owner is not LWS",
+			name: "should mutate worker sts with correct labels even thought owner is not LWS (this is expected behavior)",
 			sts: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-sts-worker-no-owner",
 					Namespace: "default",
 					Labels: map[string]string{
-						LWSNameLabel:       "test-lws",
+						LWSNameLabel: "test-lws",
+						// Presence of LWSGroupIndexLabel denotes a worker
 						LWSGroupIndexLabel: "2",
 					},
 					OwnerReferences: []metav1.OwnerReference{
@@ -111,6 +113,7 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 					Namespace: "default",
 					Labels: map[string]string{
 						LWSNameLabel: "test-lws",
+						// Absence of LWSGroupIndexLabel denotes a leader
 					},
 					OwnerReferences: []metav1.OwnerReference{
 						{
@@ -136,8 +139,10 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 			name: "should not mutate if inject label is missing",
 			sts: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
 					Labels: map[string]string{
-						LWSNameLabel:       "test-lws",
+						LWSNameLabel: "test-lws",
+						// Presence of LWSGroupIndexLabel denotes a worker
 						LWSGroupIndexLabel: "1",
 					},
 				},
@@ -154,12 +159,13 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 			expectedMutate: false,
 		},
 		{
-			name: "should not mutate if LWS owner is missing",
+			name: "should not mutate if LWS owner is missing (leader)",
 			sts: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
 					Labels: map[string]string{
-						LWSNameLabel:       "test-lws",
-						LWSGroupIndexLabel: "1",
+						LWSNameLabel: "test-lws",
+						// Absence of LWSGroupIndexLabel denotes a leader
 					},
 				},
 				Spec: appsv1.StatefulSetSpec{
@@ -173,6 +179,30 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 				},
 			},
 			expectedMutate: false,
+		},
+		{
+			name: "should mutate worker even if LWS owner is missing",
+			sts: &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Labels: map[string]string{
+						LWSNameLabel: "test-lws",
+						// Presence of LWSGroupIndexLabel denotes a worker
+						LWSGroupIndexLabel: "1",
+					},
+				},
+				Spec: appsv1.StatefulSetSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								InjectSliceSelectorLabel: "true",
+							},
+						},
+					},
+				},
+			},
+			expectedMutate: true,
+			expectedVal:    utils.LWSSliceName("test-lws", "lws-uid-12345", "worker", 1),
 		},
 	}
 
