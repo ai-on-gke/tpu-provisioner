@@ -38,6 +38,8 @@ func (h *LoggingHandler) Handle(ctx context.Context, req admission.Request) admi
 			"webhook", h.Name,
 			"namespace", req.Namespace,
 			"name", req.Name,
+			"reason", resp.Result.Reason,
+			"message", resp.Result.Message,
 			"patchType", resp.PatchType,
 		)
 	}
