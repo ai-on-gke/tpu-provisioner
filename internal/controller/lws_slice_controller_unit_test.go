@@ -95,7 +95,7 @@ func TestLWSSlices(t *testing.T) {
 					Namespace: "default",
 					UID:       testUID,
 					Annotations: map[string]string{
-						SliceSelectionAnnotation: `[{"workers":[["cube-1","cube-2"]]},{"workers":[["cube-3","cube-4"]]}]`,
+						SliceSelectionAnnotation: `{"workers":[["cube-1","cube-2"],["cube-3","cube-4"]]}`,
 					},
 				},
 				Spec: lws.LeaderWorkerSetSpec{
@@ -130,7 +130,7 @@ func TestLWSSlices(t *testing.T) {
 					Namespace: "default",
 					UID:       testUID,
 					Annotations: map[string]string{
-						SliceSelectionAnnotation: `[{"leader":["cube-0"],"workers":[["cube-1","cube-2"]]}]`,
+						SliceSelectionAnnotation: `{"leader":["cube-0"],"workers":[["cube-1","cube-2"]]}`,
 					},
 				},
 				Spec: lws.LeaderWorkerSetSpec{
@@ -227,7 +227,7 @@ func TestParseLWSSliceSelection(t *testing.T) {
 	tests := []struct {
 		name      string
 		lwset     *lws.LeaderWorkerSet
-		want      lwsSliceSelection
+		want      lwsReplicaSelection
 		wantErr   bool
 		errSubstr string
 	}{
@@ -239,7 +239,7 @@ func TestParseLWSSliceSelection(t *testing.T) {
 					Namespace: "default",
 				},
 			},
-			want:    nil,
+			want:    lwsReplicaSelection{},
 			wantErr: false,
 		},
 		{
@@ -249,22 +249,15 @@ func TestParseLWSSliceSelection(t *testing.T) {
 					Name:      "test-lws",
 					Namespace: "default",
 					Annotations: map[string]string{
-						SliceSelectionAnnotation: `[{"leader":["cube-0"],"workers":[["cube-1","cube-2"]]},{"leader":["cube-3"],"workers":[["cube-4","cube-5"]]}]`,
+						SliceSelectionAnnotation: `{"leader":["cube-0"],"workers":[["cube-1","cube-2"],["cube-4","cube-5"]]}`,
 					},
 				},
 			},
-			want: lwsSliceSelection{
-				{
-					Leader: []string{"cube-0"},
-					Workers: [][]string{
-						{"cube-1", "cube-2"},
-					},
-				},
-				{
-					Leader: []string{"cube-3"},
-					Workers: [][]string{
-						{"cube-4", "cube-5"},
-					},
+			want: lwsReplicaSelection{
+				Leader: []string{"cube-0"},
+				Workers: [][]string{
+					{"cube-1", "cube-2"},
+					{"cube-4", "cube-5"},
 				},
 			},
 			wantErr: false,
@@ -280,7 +273,7 @@ func TestParseLWSSliceSelection(t *testing.T) {
 					},
 				},
 			},
-			want:      lwsSliceSelection{},
+			want:      lwsReplicaSelection{},
 			wantErr:   true,
 			errSubstr: "slice selection should be of the format",
 		},

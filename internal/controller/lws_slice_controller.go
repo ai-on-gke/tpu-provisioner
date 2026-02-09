@@ -163,8 +163,6 @@ type lwsReplicaSelection struct {
 	Workers [][]string `json:"workers"`
 }
 
-type lwsSliceSelection []lwsReplicaSelection
-
 func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 	var slices []v1beta1.Slice
 
@@ -188,9 +186,7 @@ func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 
 		if accel == tpu7xAccelerator || accel == tpuV7xAccelerator {
 			var partitionIds []string
-			for i := 0; i < len(selection); i++ {
-				partitionIds = append(partitionIds, selection[i].Leader...)
-			}
+			partitionIds = append(partitionIds, selection.Leader...)
 
 			slices = append(slices, v1beta1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
@@ -220,10 +216,8 @@ func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 
 		if accel == tpu7xAccelerator || accel == tpuV7xAccelerator {
 			var partitionIds []string
-			if i < len(selection) {
-				for _, w := range selection[i].Workers {
-					partitionIds = append(partitionIds, w...)
-				}
+			if i < len(selection.Workers) {
+				partitionIds = append(partitionIds, selection.Workers[i]...)
 			}
 
 			slices = append(slices, v1beta1.Slice{
@@ -248,16 +242,14 @@ func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 }
 
 // parseLWSSliceSelection returns the slice selection from the annotation.
-// The expected format is a JSON array of objects, one per replica:
+// The expected format is a JSON object:
 //
-//	[
-//	  {
-//	    "leader": ["cube-1", "cube-2"],
-//	    "workers": [["cube-3", "cube-4"], ["cube-5", "cube-6"]]
-//	  }
-//	]
-func parseLWSSliceSelection(lwset *lws.LeaderWorkerSet) (lwsSliceSelection, error) {
-	var selection lwsSliceSelection
+//	{
+//	  "leader": ["cube-1", "cube-2"],
+//	  "workers": [["cube-3", "cube-4"], ["cube-5", "cube-6"]]
+//	}
+func parseLWSSliceSelection(lwset *lws.LeaderWorkerSet) (lwsReplicaSelection, error) {
+	var selection lwsReplicaSelection
 	if lwset.Annotations == nil {
 		return selection, nil
 	}
@@ -267,7 +259,7 @@ func parseLWSSliceSelection(lwset *lws.LeaderWorkerSet) (lwsSliceSelection, erro
 	}
 
 	if err := json.Unmarshal([]byte(val), &selection); err != nil {
-		return selection, fmt.Errorf("slice selection should be of the format '[{\"leader\": [\"cube-1\", \"cube-2\"], \"workers\": [[...]]}]': %w", err)
+		return selection, fmt.Errorf("slice selection should be of the format '{\"leader\": [\"cube-1\", \"cube-2\"], \"workers\": [[...]]}': %w", err)
 	}
 
 	return selection, nil
