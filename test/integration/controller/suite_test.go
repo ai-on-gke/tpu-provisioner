@@ -137,6 +137,9 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
+	err = controller.SetupSliceFieldIndexer(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
 	err = (&controller.JobSetSliceReconciler{
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
