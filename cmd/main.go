@@ -317,6 +317,7 @@ func main() {
 		lwsWebhook := &jobwebhook.LoggingHandler{
 			Name: "lws",
 			Handler: &jobwebhook.LWSStatefulSetMutationHandler{
+				Client:  mgr.GetClient(),
 				Decoder: admission.NewDecoder(scheme),
 			},
 		}

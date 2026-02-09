@@ -11,15 +11,28 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 )
 
 func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = appsv1.AddToScheme(scheme)
+	_ = lws.AddToScheme(scheme)
 	decoder := admission.NewDecoder(scheme)
 
+	lwsObj := &lws.LeaderWorkerSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-lws",
+			Namespace: "default",
+			UID:       "lws-uid-12345",
+		},
+	}
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(lwsObj).Build()
+
 	handler := &LWSStatefulSetMutationHandler{
+		Client:  client,
 		Decoder: decoder,
 	}
 
@@ -58,6 +71,37 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 			},
 			expectedMutate: true,
 			expectedVal:    utils.LWSSliceName("test-lws", "lws-uid-12345", "worker", 1),
+		},
+		{
+			name: "should mutate worker sts with correct labels even if owner is not LWS",
+			sts: &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sts-worker-no-owner",
+					Namespace: "default",
+					Labels: map[string]string{
+						LWSNameLabel:       "test-lws",
+						LWSGroupIndexLabel: "2",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							Kind: "Pod",
+							Name: "leader-pod",
+							UID:  "pod-uid-67890",
+						},
+					},
+				},
+				Spec: appsv1.StatefulSetSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								InjectSliceSelectorLabel: "true",
+							},
+						},
+					},
+				},
+			},
+			expectedMutate: true,
+			expectedVal:    utils.LWSSliceName("test-lws", "lws-uid-12345", "worker", 2),
 		},
 		{
 			name: "should mutate leader sts with correct labels and owner",

@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	appsv1 "k8s.io/api/apps/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 )
 
 const (
@@ -19,6 +23,7 @@ const (
 
 // LWSStatefulSetMutationHandler handles admission requests for StatefulSet mutations belonging to an LWS
 type LWSStatefulSetMutationHandler struct {
+	Client  client.Client
 	Decoder admission.Decoder
 }
 
@@ -48,23 +53,6 @@ func (h *LWSStatefulSetMutationHandler) Handle(ctx context.Context, req admissio
 		return admission.Allowed("missing LWS name label")
 	}
 
-	// Get LWS UID from OwnerReferences
-	var lwsUID string
-	for _, ref := range sts.OwnerReferences {
-		if ref.Kind == "LeaderWorkerSet" {
-			lwsUID = string(ref.UID)
-			break
-		}
-	}
-
-	if lwsUID == "" {
-		return admission.Allowed("missing LeaderWorkerSet owner reference")
-	}
-
-	if sts.Spec.Template.Spec.NodeSelector == nil {
-		sts.Spec.Template.Spec.NodeSelector = make(map[string]string)
-	}
-
 	replica := -1
 	component := "leader"
 	if groupIndexStr, ok := sts.Labels[LWSGroupIndexLabel]; ok {
@@ -76,6 +64,50 @@ func (h *LWSStatefulSetMutationHandler) Handle(ctx context.Context, req admissio
 		component = "worker"
 	}
 
+	// Get LWS UID
+	var lwsUID string
+	if component == "leader" {
+		// For leader, we expect the LWS to be the owner
+		for _, ref := range sts.OwnerReferences {
+			if ref.Kind == "LeaderWorkerSet" {
+				lwsUID = string(ref.UID)
+				break
+			}
+		}
+	} else {
+		// For worker, owner is a Pod from the leader STS. Lookup the LWS directly to get LWS UID.
+		lwsObj := &lws.LeaderWorkerSet{}
+		var err error
+		backoff := []time.Duration{500 * time.Millisecond, 1 * time.Second, 2 * time.Second}
+		for i := 0; i <= len(backoff); i++ {
+			err = h.Client.Get(ctx, client.ObjectKey{Name: lwsName, Namespace: sts.Namespace}, lwsObj)
+			if err == nil {
+				lwsUID = string(lwsObj.UID)
+				break
+			}
+			if !apierrors.IsNotFound(err) {
+				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("getting LeaderWorkerSet %s/%s: %w", sts.Namespace, lwsName, err))
+			}
+			if i < len(backoff) {
+				select {
+				case <-ctx.Done():
+					return admission.Errored(http.StatusInternalServerError, ctx.Err())
+				case <-time.After(backoff[i]):
+				}
+			}
+		}
+		if err != nil {
+			return admission.Errored(http.StatusNotFound, fmt.Errorf("LeaderWorkerSet %s/%s not found after retries: %w", sts.Namespace, lwsName, err))
+		}
+	}
+
+	if lwsUID == "" {
+		return admission.Allowed("missing LeaderWorkerSet owner")
+	}
+
+	if sts.Spec.Template.Spec.NodeSelector == nil {
+		sts.Spec.Template.Spec.NodeSelector = make(map[string]string)
+	}
 	key, val := SliceNodeSelector, utils.LWSSliceName(lwsName, lwsUID, component, replica)
 	sts.Spec.Template.Spec.NodeSelector[key] = val
 
