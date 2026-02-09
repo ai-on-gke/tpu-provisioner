@@ -83,6 +83,13 @@ func (r *LeaderWorkerSetSliceReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, nil
 	}
 
+	// LWS only supports "async" mode.
+	if mode := utils.GetProvisioningMode(&lwset); mode != utils.SliceProvisioningModeAsync {
+		log.Info("LWS provisioning mode must be async", "mode", mode)
+		r.Recorder.Eventf(&lwset, corev1.EventTypeWarning, "SyncModeNotSupported", "LWS provisioning mode must be 'async', found '%s'", mode)
+		return ctrl.Result{}, nil
+	}
+
 	// Add finalizer if not present
 	if !controllerutil.ContainsFinalizer(&lwset, SliceCleanupFinalizer) {
 		log.Info("Adding finalizer to LeaderWorkerSet", "finalizer", SliceCleanupFinalizer)
