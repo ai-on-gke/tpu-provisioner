@@ -130,13 +130,6 @@ func (r *JobSetSliceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 func (r *JobSetSliceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Register index for PartitionIds to allow quick lookup of slices by partition
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1beta1.Slice{}, slicePartitionIdsField, func(rawObj client.Object) []string {
-		slice := rawObj.(*v1beta1.Slice)
-		return slice.Spec.PartitionIds
-	}); err != nil {
-		return err
-	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&jobset.JobSet{}).

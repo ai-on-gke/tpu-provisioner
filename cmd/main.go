@@ -237,6 +237,10 @@ func main() {
 	}
 
 	if enableSliceController {
+		if err := controller.SetupSliceFieldIndexer(mgr); err != nil {
+			setupLog.Error(err, "unable to setup slice field indexer")
+			os.Exit(1)
+		}
 		recreateConditions := controller.ParseRecreateConditions(cfg.SliceRecreateConditions)
 		if err := (&controller.JobSetSliceReconciler{
 			Client:                  mgr.GetClient(),

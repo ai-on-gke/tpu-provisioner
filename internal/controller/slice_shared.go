@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -27,12 +28,20 @@ const (
 
 const (
 	jobSetOwnerKind = "jobset"
-	LWSOwnerKind    = "LeaderWorkerSet"
+	LWSOwnerKind    = "leaderworkerset"
 )
 
 const SliceCleanupFinalizer = "tpu-provisioner.cloud.google.com/slice-cleanup"
 const SliceSelectionAnnotation = "tpu-provisioner.cloud.google.com/slice-selection"
 const slicePartitionIdsField = "spec.partitionIds"
+
+// SetupSliceFieldIndexer registers the index for PartitionIds to allow quick lookup of slices by partition.
+func SetupSliceFieldIndexer(mgr ctrl.Manager) error {
+	return mgr.GetFieldIndexer().IndexField(context.Background(), &v1beta1.Slice{}, slicePartitionIdsField, func(rawObj client.Object) []string {
+		slice := rawObj.(*v1beta1.Slice)
+		return slice.Spec.PartitionIds
+	})
+}
 
 type RecreateCondition struct {
 	Reason           string
