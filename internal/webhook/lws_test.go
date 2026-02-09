@@ -8,6 +8,7 @@ import (
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -35,14 +36,22 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 					Name:      "test-sts-worker",
 					Namespace: "default",
 					Labels: map[string]string{
-						InjectSliceSelectorLabel: "true",
-						LWSNameLabel:             "test-lws",
-						LWSGroupIndexLabel:       "1",
+						LWSNameLabel:       "test-lws",
+						LWSGroupIndexLabel: "1",
 					},
 					OwnerReferences: []metav1.OwnerReference{
 						{
 							Kind: "LeaderWorkerSet",
 							UID:  "lws-uid-12345",
+						},
+					},
+				},
+				Spec: appsv1.StatefulSetSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								InjectSliceSelectorLabel: "true",
+							},
 						},
 					},
 				},
@@ -57,13 +66,21 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 					Name:      "test-sts-leader",
 					Namespace: "default",
 					Labels: map[string]string{
-						InjectSliceSelectorLabel: "true",
-						LWSNameLabel:             "test-lws",
+						LWSNameLabel: "test-lws",
 					},
 					OwnerReferences: []metav1.OwnerReference{
 						{
 							Kind: "LeaderWorkerSet",
 							UID:  "lws-uid-12345",
+						},
+					},
+				},
+				Spec: appsv1.StatefulSetSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								InjectSliceSelectorLabel: "true",
+							},
 						},
 					},
 				},
@@ -80,6 +97,15 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 						LWSGroupIndexLabel: "1",
 					},
 				},
+				Spec: appsv1.StatefulSetSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								// InjectSliceSelectorLabel missing
+							},
+						},
+					},
+				},
 			},
 			expectedMutate: false,
 		},
@@ -88,9 +114,17 @@ func TestLWSStatefulSetMutationHandler_Handle(t *testing.T) {
 			sts: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						InjectSliceSelectorLabel: "true",
-						LWSNameLabel:             "test-lws",
-						LWSGroupIndexLabel:       "1",
+						LWSNameLabel:       "test-lws",
+						LWSGroupIndexLabel: "1",
+					},
+				},
+				Spec: appsv1.StatefulSetSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								InjectSliceSelectorLabel: "true",
+							},
+						},
 					},
 				},
 			},

@@ -36,8 +36,11 @@ func (h *LWSStatefulSetMutationHandler) Handle(ctx context.Context, req admissio
 	}
 
 	// Double check if we should inject
-	if sts.Labels[InjectSliceSelectorLabel] != "true" {
-		return admission.Allowed("inject-slice-selector label not set to true")
+	if sts.Spec.Template.Labels == nil {
+		return admission.Allowed("missing statefulset template labels")
+	}
+	if sts.Spec.Template.Labels[InjectSliceSelectorLabel] != "true" {
+		return admission.Allowed("inject-slice-selector label on pod template not set to true")
 	}
 
 	lwsName := sts.Labels[LWSNameLabel]

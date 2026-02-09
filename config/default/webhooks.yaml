@@ -69,9 +69,10 @@ webhooks:
     # Only mutate StatefulSets managed by a LeaderWorkerSet
     - key: leaderworkerset.sigs.k8s.io/name
       operator: Exists
-    - key: tpu-provisioner.cloud.google.com/inject-slice-selector
-      operator: In
-      values: ["true"]
+    # NOTE: LWS does not allow the user to specify statefulset labels:
+    #- key: tpu-provisioner.cloud.google.com/inject-slice-selector
+    #  operator: In
+    #  values: ["true"]
   failurePolicy: Fail
   timeoutSeconds: 20
   clientConfig:

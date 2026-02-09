@@ -2,6 +2,8 @@ apiVersion: leaderworkerset.x-k8s.io/v1
 kind: LeaderWorkerSet
 metadata:
   name: lws-7x
+  labels:
+    tpu-provisioner.cloud.google.com/slice-autoprovisioning: async
   annotations:
     # Optional: Manually select specific slice partitions
     # Format: [{"leader": ["partition-id"], "workers": [["partition-id", ...]]}]

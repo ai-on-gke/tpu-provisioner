@@ -121,7 +121,9 @@ func (r *LeaderWorkerSetSliceReconciler) SetupWithManager(mgr ctrl.Manager) erro
 			if lwset, ok := object.(*lws.LeaderWorkerSet); ok {
 				return utils.SliceProvisioningEnabled(lwset) &&
 					(lwset.Spec.LeaderWorkerTemplate.WorkerTemplate.Spec.NodeSelector[acceleratorSelector] == tpu7xAccelerator ||
-						lwset.Spec.LeaderWorkerTemplate.WorkerTemplate.Spec.NodeSelector[acceleratorSelector] == tpuV7xAccelerator)
+						lwset.Spec.LeaderWorkerTemplate.LeaderTemplate.Spec.NodeSelector[acceleratorSelector] == tpu7xAccelerator ||
+						lwset.Spec.LeaderWorkerTemplate.WorkerTemplate.Spec.NodeSelector[acceleratorSelector] == tpuV7xAccelerator ||
+						lwset.Spec.LeaderWorkerTemplate.LeaderTemplate.Spec.NodeSelector[acceleratorSelector] == tpuV7xAccelerator)
 			}
 			return true
 		})).
