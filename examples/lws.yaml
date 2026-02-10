@@ -45,6 +45,8 @@ spec:
               google.com/tpu: "4"
         nodeSelector:
           cloud.google.com/gke-tpu-accelerator: tpu7x
+          # Needed on GKE:
+          # cloud.google.com/gke-tpu-topology: "4x4x8"
         tolerations:
         - effect: NoSchedule
           key: google.com/tpu
