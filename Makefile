@@ -53,7 +53,7 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 JOBSET_VERSION ?= "v0.5.0"
-LWS_VERSION ?= "v0.6.2"
+LWS_VERSION ?= "v0.8.0"
 
 .PHONY: test
 test: manifests fmt vet envtest ## Run tests.
