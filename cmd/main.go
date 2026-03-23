@@ -194,6 +194,7 @@ func main() {
 			"nodeServiceAccount", cfg.GCPNodeServiceAccount,
 			"nodeTags", cfg.GCPNodeTags,
 			"podToNodeLabels", cfg.GCPPodToNodeLabels,
+			"maxPodsPerNode", cfg.GKEMaxPodsPerNode,
 		)
 
 		clusterCtx := cloud.GKEContext{
@@ -211,6 +212,7 @@ func main() {
 			PodToNodeLabels:         cfg.GCPPodToNodeLabels,
 			NodeSecureBoot:          cfg.GCPNodeSecureBoot,
 			ForceOnDemand:           cfg.GCPForceOnDemand,
+			MaxPodsPerNode:          cfg.GKEMaxPodsPerNode,
 		}
 
 		containers, err := containerv1beta1.NewService(context.Background() /*, option.WithCredentials(creds)*/)
