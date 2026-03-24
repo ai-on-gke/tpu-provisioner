@@ -8,8 +8,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/cmd/config"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -24,6 +22,8 @@ import (
 
 func TestEnsureStaticNodePool(t *testing.T) {
 	gke, svc := newTestGKE(t)
+
+	gke.ClusterContext.MaxPodsPerNode = 20
 
 	ctx := context.Background()
 
@@ -69,6 +69,9 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	if got, want := np1.Config.Labels[LabelProvisionerNodepoolID], "np-name-0001"; got != want {
 		t.Errorf("got label %q, want %q", got, want)
 	}
+	if got, want := np1.MaxPodsConstraint.MaxPodsPerNode, int64(20); got != want {
+		t.Errorf("got MaxPodsPerNode %d, want %d", got, want)
+	}
 
 	np2 := svc.nodePools["np-name-0002"]
 	if np2 == nil {
@@ -77,13 +80,17 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	if got, want := np2.Config.Labels[LabelProvisionerNodepoolID], "np-name-0002"; got != want {
 		t.Errorf("got label %q, want %q", got, want)
 	}
+	if got, want := np2.MaxPodsConstraint.MaxPodsPerNode, int64(20); got != want {
+		t.Errorf("got MaxPodsPerNode %d, want %d", got, want)
+	}
 
 	// Test np-prefix nodepool prefix with different block name.
 	npPrefixConfig := &StaticNodePoolConfig{
-		MachineType: "tpu7x-standard-4t",
-		Accelerator: V7xSliceAccelerator,
-		Topology:    "4x4x4",
-		NodeCount:   16,
+		MachineType:    "tpu7x-standard-4t",
+		Accelerator:    V7xSliceAccelerator,
+		Topology:       "4x4x4",
+		NodeCount:      16,
+		MaxPodsPerNode: 25,
 	}
 	desired2 := []*DesiredStaticNodePool{
 		{
@@ -119,6 +126,9 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	if got, want := np3.Config.Labels[LabelProvisionerNodepoolID], "np-prefix-0001"; got != want {
 		t.Errorf("got label %q, want %q", got, want)
 	}
+	if got, want := np3.MaxPodsConstraint.MaxPodsPerNode, int64(25); got != want {
+		t.Errorf("got MaxPodsPerNode %d, want %d", got, want)
+	}
 
 	np4 := svc.nodePools["np-prefix-0002"]
 	if np4 == nil {
@@ -126,6 +136,9 @@ func TestEnsureStaticNodePool(t *testing.T) {
 	}
 	if got, want := np4.Config.Labels[LabelProvisionerNodepoolID], "np-prefix-0002"; got != want {
 		t.Errorf("got label %q, want %q", got, want)
+	}
+	if got, want := np4.MaxPodsConstraint.MaxPodsPerNode, int64(25); got != want {
+		t.Errorf("got MaxPodsPerNode %d, want %d", got, want)
 	}
 }
 
@@ -138,7 +151,7 @@ func newTestGKE(t *testing.T) (*GKE, *mockGKEService) {
 	}
 	clusterCtx := GKEContext{
 		ProjectID:              "test-project",
-		MaxPodsPerNode:         config.DefaultGKEMaxPodsPerNode,
+		MaxPodsPerNode:         16,
 		ClusterLocation:        "us-east5",
 		Cluster:                "test-cluster",
 		NodeZone:               "us-east5-a",
@@ -619,7 +632,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -650,7 +663,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  1,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				PlacementPolicy:   &container.PlacementPolicy{},
 				Name:              "jobset-test-rando",
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -681,7 +694,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  1,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				PlacementPolicy:   &container.PlacementPolicy{},
 				Name:              "jobset-test-rando",
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -712,7 +725,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  4,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				PlacementPolicy: &container.PlacementPolicy{
 					TpuTopology: "4x4",
 					Type:        "COMPACT",
@@ -748,7 +761,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -779,7 +792,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -811,7 +824,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -846,7 +859,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -875,7 +888,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -902,7 +915,7 @@ func TestNodePoolForPod(t *testing.T) {
 				}, InitialNodeCount: 512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -933,7 +946,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -961,7 +974,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -995,7 +1008,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -1029,7 +1042,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -1056,7 +1069,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -1100,7 +1113,7 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -1144,7 +1157,41 @@ func TestNodePoolForPod(t *testing.T) {
 				InitialNodeCount:  512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
-				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: config.DefaultGKEMaxPodsPerNode},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
+				Name:              "jobset-test-rando",
+				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
+				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
+			},
+		},
+		{
+			desc: "dynamic nodepool with custom max pods per node",
+			gkeContext: GKEContext{
+				MaxPodsPerNode: 20,
+			},
+			pod: podBuild{
+				selector: map[string]string{
+					"cloud.google.com/gke-tpu-accelerator": "tpu-v5p-slice",
+					"cloud.google.com/gke-tpu-topology":    "8x16x16",
+				},
+				tpuResource: "4",
+			},
+			want: &container.NodePool{
+				Config: &container.NodeConfig{
+					Labels: map[string]string{
+						"google.com/nodepool-manager":                 "tpu-provisioner",
+						"google.com/tpu-provisioner-jobset-name":      "jobset-test",
+						"google.com/tpu-provisioner-jobset-namespace": "default",
+						"google.com/tpu-provisioner-parent-kind":      "job",
+						"google.com/tpu-provisioner-parent-name":      "jobset-test-job-1-0",
+						"google.com/tpu-provisioner-parent-namespace": "default",
+					},
+					MachineType:            "ct5p-hightpu-4t",
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+				},
+				InitialNodeCount:  512,
+				Locations:         []string{""},
+				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 20},
 				Name:              "jobset-test-rando",
 				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
 				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
@@ -1154,7 +1201,7 @@ func TestNodePoolForPod(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
 			if tc.gkeContext.MaxPodsPerNode == 0 {
-				tc.gkeContext.MaxPodsPerNode = config.DefaultGKEMaxPodsPerNode
+				tc.gkeContext.MaxPodsPerNode = 16
 			}
 			gke := &GKE{
 				ClusterContext: tc.gkeContext,
@@ -1787,76 +1834,5 @@ func TestDiffStaticNodePools(t *testing.T) {
 				t.Errorf("toDeleteError mismatch (-want +got):\n%s", diff)
 			}
 		})
-	}
-}
-
-func TestGKEMaxPodsPerNode18(t *testing.T) {
-	gke := &GKE{
-		ClusterContext: GKEContext{
-			ProjectID:       "test-project",
-			ClusterLocation: "us-east5",
-			Cluster:         "test-cluster",
-			NodeZone:        "us-east5-a",
-			MaxPodsPerNode:  18,
-		},
-	}
-
-	// 1. Dynamic Nodepool
-	pod := buildPod(podBuild{
-		selector: map[string]string{
-			"cloud.google.com/gke-tpu-accelerator": "tpu-v4-podslice",
-			"cloud.google.com/gke-tpu-topology":    "2x2x1",
-		},
-		tpuResource: "4",
-	})
-	dynamicNP, err := gke.nodePoolForPod(pod)
-	if err != nil {
-		t.Fatalf("nodePoolForPod failed: %v", err)
-	}
-	if dynamicNP.MaxPodsConstraint == nil || dynamicNP.MaxPodsConstraint.MaxPodsPerNode != 18 {
-		if dynamicNP.MaxPodsConstraint != nil {
-			t.Errorf("Dynamic Nodepool: expected MaxPodsPerNode to be 18, got %v", dynamicNP.MaxPodsConstraint.MaxPodsPerNode)
-		} else {
-			t.Errorf("Dynamic Nodepool: expected MaxPodsPerNode to be 18, got nil MaxPodsConstraint")
-		}
-	}
-
-	// 2. Static Nodepool
-	staticConfig := &StaticNodePoolConfig{
-		MachineType: "ct5p-hightpu-4t",
-		Accelerator: V5pPodSliceAccelerator,
-		Topology:    "2x2x2",
-		NodeCount:   8,
-	}
-	staticNP, err := gke.StaticNodePoolForSubBlock("np-test-0001", "projects/test/reservations/res-1/reservationBlocks/np-name-block/reservationSubBlocks/np-name-block-subblock-0001", staticConfig)
-	if err != nil {
-		t.Fatalf("StaticNodePoolForSubBlock failed: %v", err)
-	}
-	if staticNP.MaxPodsConstraint == nil || staticNP.MaxPodsConstraint.MaxPodsPerNode != 18 {
-		if staticNP.MaxPodsConstraint != nil {
-			t.Errorf("Static Nodepool: expected MaxPodsPerNode to be 18, got %v", staticNP.MaxPodsConstraint.MaxPodsPerNode)
-		} else {
-			t.Errorf("Static Nodepool: expected MaxPodsPerNode to be 18, got nil MaxPodsConstraint")
-		}
-	}
-
-	// 3. Static Nodepool with Explicit Override
-	staticConfigOverride := &StaticNodePoolConfig{
-		MachineType:    "ct5p-hightpu-4t",
-		Accelerator:    V5pPodSliceAccelerator,
-		Topology:       "2x2x2",
-		NodeCount:      8,
-		MaxPodsPerNode: 25,
-	}
-	staticNPOverride, err := gke.StaticNodePoolForSubBlock("np-test-0002", "projects/test/reservations/res-1/reservationBlocks/np-name-block/reservationSubBlocks/np-name-block-subblock-0002", staticConfigOverride)
-	if err != nil {
-		t.Fatalf("StaticNodePoolForSubBlock failed: %v", err)
-	}
-	if staticNPOverride.MaxPodsConstraint == nil || staticNPOverride.MaxPodsConstraint.MaxPodsPerNode != 25 {
-		if staticNPOverride.MaxPodsConstraint != nil {
-			t.Errorf("Static Nodepool Override: expected MaxPodsPerNode to be 25, got %v", staticNPOverride.MaxPodsConstraint.MaxPodsPerNode)
-		} else {
-			t.Errorf("Static Nodepool Override: expected MaxPodsPerNode to be 25, got nil MaxPodsConstraint")
-		}
 	}
 }
