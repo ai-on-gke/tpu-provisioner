@@ -36,7 +36,7 @@ func TestParseEnv(t *testing.T) {
 			want: Config{
 				Provider:                        "gke",
 				GCPNodeSecureBoot:               true,
-				GKEMaxPodsPerNode:               DefaultGKEMaxPodsPerNode,
+				GKEMaxPodsPerNode:               16,
 				NodeMinLifespan:                 10 * time.Second,
 				NodepoolDeletionDelay:           30 * time.Second,
 				PodResourceType:                 "google.com/tpu",

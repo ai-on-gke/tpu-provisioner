@@ -22,10 +22,6 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
-const (
-	DefaultGKEMaxPodsPerNode = 16
-)
-
 type Config struct {
 	// Provider can be "gke" or "mock".
 	Provider string `envconfig:"PROVIDER" default:"gke"`
@@ -51,7 +47,7 @@ type Config struct {
 	GCPForceOnDemand bool `envconfig:"GCP_FORCE_ON_DEMAND" default:"false"`
 
 	// GKEMaxPodsPerNode sets the max pods per node in provisioned node pools
-	GKEMaxPodsPerNode int `envconfig:"GKE_MAX_PODS_PER_NODE"`
+	GKEMaxPodsPerNode int `envconfig:"GKE_MAX_PODS_PER_NODE" default:"16"`
 
 	// NodeMinLifespan is the amount of time that should pass between a Node object
 	// creation and a cleanup of that Node. This is mostly irrelevant now that JobSet
@@ -75,9 +71,7 @@ type Config struct {
 }
 
 func ParseEnv() (Config, error) {
-	cfg := Config{
-		GKEMaxPodsPerNode: DefaultGKEMaxPodsPerNode,
-	}
+	cfg := Config{}
 	err := envconfig.Process("", &cfg)
 	return cfg, err
 }
