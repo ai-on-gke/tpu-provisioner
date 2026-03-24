@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	DefaultGKEMaxPodsPerNode = 15
+	DefaultGKEMaxPodsPerNode = 16
 )
 
 type Config struct {
