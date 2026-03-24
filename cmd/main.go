@@ -58,6 +58,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -74,6 +75,7 @@ func init() {
 	}
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme))
+	utilruntime.Must(lws.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -235,8 +237,12 @@ func main() {
 	}
 
 	if enableSliceController {
+		if err := controller.SetupSliceFieldIndexer(mgr); err != nil {
+			setupLog.Error(err, "unable to setup slice field indexer")
+			os.Exit(1)
+		}
 		recreateConditions := controller.ParseRecreateConditions(cfg.SliceRecreateConditions)
-		if err := (&controller.SliceReconciler{
+		if err := (&controller.JobSetSliceReconciler{
 			Client:                  mgr.GetClient(),
 			Scheme:                  mgr.GetScheme(),
 			Recorder:                mgr.GetEventRecorderFor("tpu-provisioner"),
@@ -244,6 +250,17 @@ func main() {
 			ConditionalRecreateWait: cfg.SliceConditionalRecreateWait,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "SliceReconciler")
+			os.Exit(1)
+		}
+
+		if err := (&controller.LeaderWorkerSetSliceReconciler{
+			Client:                  mgr.GetClient(),
+			Scheme:                  mgr.GetScheme(),
+			Recorder:                mgr.GetEventRecorderFor("tpu-provisioner"),
+			RecreateConditions:      recreateConditions,
+			ConditionalRecreateWait: cfg.SliceConditionalRecreateWait,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "LeaderWorkerSetSliceReconciler")
 			os.Exit(1)
 		}
 	}
@@ -293,10 +310,22 @@ func main() {
 
 	if enableWebhooks {
 		// Register webhook handlers
-		jobWebhook := &jobwebhook.JobMutationHandler{
-			Decoder: admission.NewDecoder(scheme),
+		jobWebhook := &jobwebhook.LoggingHandler{
+			Name: "job",
+			Handler: &jobwebhook.JobMutationHandler{
+				Decoder: admission.NewDecoder(scheme),
+			},
 		}
 		mgr.GetWebhookServer().Register("/mutate", &webhook.Admission{Handler: jobWebhook})
+
+		lwsWebhook := &jobwebhook.LoggingHandler{
+			Name: "lws",
+			Handler: &jobwebhook.LWSStatefulSetMutationHandler{
+				Client:  mgr.GetClient(),
+				Decoder: admission.NewDecoder(scheme),
+			},
+		}
+		mgr.GetWebhookServer().Register("/mutate-lws", &webhook.Admission{Handler: lwsWebhook})
 	}
 
 	//+kubebuilder:scaffold:builder

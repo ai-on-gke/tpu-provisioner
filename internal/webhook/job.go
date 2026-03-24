@@ -42,12 +42,10 @@ type JobMutationHandler struct {
 
 // Handle processes the admission request
 func (h *JobMutationHandler) Handle(ctx context.Context, req admission.Request) admission.Response {
-	log.Info("mutating job", "namespace", req.Namespace, "name", req.Name)
 
 	// Decode the Job object
 	job := &batchv1.Job{}
 	if err := h.Decoder.Decode(req, job); err != nil {
-		log.Error(err, "failed to decode job")
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
@@ -98,24 +96,14 @@ func (h *JobMutationHandler) Handle(ctx context.Context, req admission.Request) 
 		jobsetName, jobsetUID, replicatedJobName, replicatedJobIndex)
 	job.Spec.Template.Spec.NodeSelector[key] = val
 
-	log.Info("added node selector to job",
-		"namespace", req.Namespace,
-		"name", job.Name,
-		"key", key, "val", val)
+	job.Spec.Template.Spec.NodeSelector[key] = val
 
 	// Marshal the modified job
 	marshaledJob, err := json.Marshal(job)
 	if err != nil {
-		log.Error(err, "failed to marshal modified job")
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
 	// Return patch response
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledJob)
-}
-
-// InjectDecoder injects the decoder
-func (h *JobMutationHandler) InjectDecoder(d admission.Decoder) error {
-	h.Decoder = d
-	return nil
 }

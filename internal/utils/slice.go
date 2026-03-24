@@ -13,3 +13,16 @@ func SliceName(jsName, jsUID string, replicatedJobName string, replicatedJobRepl
 		replicatedJobReplica,
 	)
 }
+
+// LWSSliceName formats a name for a Slice owned by a LeaderWorkerSet.
+func LWSSliceName(lwsName, lwsUID string, component string, replica int) string {
+	name := fmt.Sprintf("lws-%s-%s-%s",
+		lwsName[:min(32, len(lwsName))],
+		lwsUID[:8],
+		component,
+	)
+	if replica >= 0 {
+		name = fmt.Sprintf("%s-%d", name, replica)
+	}
+	return name
+}

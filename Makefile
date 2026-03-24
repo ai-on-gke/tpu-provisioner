@@ -53,10 +53,12 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 JOBSET_VERSION ?= "v0.5.0"
+LWS_VERSION ?= "v0.8.0"
 
 .PHONY: test
 test: manifests fmt vet envtest ## Run tests.
 	curl -L https://github.com/kubernetes-sigs/jobset/releases/download/$(JOBSET_VERSION)/manifests.yaml > test/crds/jobset-$(JOBSET_VERSION).yaml
+	curl -L https://github.com/kubernetes-sigs/lws/releases/download/$(LWS_VERSION)/manifests.yaml > test/crds/lws-$(LWS_VERSION).yaml
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -v -coverprofile cover.out
 
 ##@ Build

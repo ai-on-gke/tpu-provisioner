@@ -2,6 +2,7 @@ package utils
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
@@ -40,19 +41,21 @@ func AutoProvisioningDisabledForJobSet(js *jobset.JobSet) bool {
 	return false
 }
 
-func SliceProvisioningEnabled(js *jobset.JobSet) bool {
-	return js.Labels != nil &&
-		(js.Labels[SliceProvisioningLabel] == SliceProvisioningModeAsync ||
-			js.Labels[SliceProvisioningLabel] == SliceProvisioningModeSync)
+func SliceProvisioningEnabled(obj client.Object) bool {
+	labels := obj.GetLabels()
+	return labels != nil &&
+		(labels[SliceProvisioningLabel] == SliceProvisioningModeAsync ||
+			labels[SliceProvisioningLabel] == SliceProvisioningModeSync)
 }
 
-// getProvisioningMode returns the provisioning mode from the JobSet annotation.
-// Returns empty string if the annotation is not set.
-func GetProvisioningMode(js *jobset.JobSet) string {
-	if js.Labels == nil {
+// getProvisioningMode returns the provisioning mode from the object labels.
+// Returns empty string if the label is not set.
+func GetProvisioningMode(obj client.Object) string {
+	labels := obj.GetLabels()
+	if labels == nil {
 		return ""
 	}
-	return js.Labels[SliceProvisioningLabel]
+	return labels[SliceProvisioningLabel]
 }
 
 // IsPartitionIDLabel checks if a label key matches the GKE TPU partition ID pattern.
