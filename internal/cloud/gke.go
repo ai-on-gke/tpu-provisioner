@@ -55,13 +55,6 @@ const (
 	gcpLabelPrefix    = "cloud.google.com/"
 	googleLabelPrefix = "google.com/"
 
-	// Default max pods per node is 110, but a lower value is necessary for large scale clusters,
-	// otherwise we'll run out of IP Space and provisioning will fail.
-	// 15 pods per node will work for small and large cluster sizes, given the TPU constraint of
-	// 1 pod per TPU node + kube-system pods
-	// TODO: move this to a environment variable
-	maxPodsPerNode = 15
-
 	// Constants for node pool naming conventions.
 	maxJobSetPrefixLength = 34
 	jobKeySuffixLength    = 5
@@ -538,7 +531,7 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 		UpgradeSettings: &containerv1beta1.UpgradeSettings{
 			MaxSurge: 1,
 		},
-		MaxPodsConstraint: &containerv1beta1.MaxPodsConstraint{MaxPodsPerNode: maxPodsPerNode},
+		MaxPodsConstraint: &containerv1beta1.MaxPodsConstraint{MaxPodsPerNode: int64(g.ClusterContext.MaxPodsPerNode)},
 		NetworkConfig:     networkConfig,
 	}
 
@@ -940,7 +933,7 @@ func (g *GKE) StaticNodePoolForSubBlock(nodePoolID, subblockToConsume string, co
 		autorepair = *config.EnableAutoRepair
 	}
 
-	maxPods := maxPodsPerNode
+	maxPods := g.ClusterContext.MaxPodsPerNode
 	if config.MaxPodsPerNode != 0 {
 		maxPods = int(config.MaxPodsPerNode)
 	}

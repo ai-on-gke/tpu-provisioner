@@ -239,9 +239,20 @@ This key contains the configuration for the nodepools that will be created. The 
 *   `nodeLabels`: A map of key-value pairs to set as labels on the nodes.
 *   `shieldedIntegrityMonitoring`: (Optional) `true` or `false` to enable/disable shielded integrity monitoring. Defaults to `nil` (GKE default).
 *   `shieldedSecureBoot`: (Optional) `true` or `false` to enable/disable shielded secure boot. Defaults to `nil` (GKE default).
-*   `maxPodsPerNode`: (Optional) The maximum number of pods that can run on a node.
+*   `maxPodsPerNode`: (Optional) The maximum number of pods that can run on a node. For static nodepools, this takes precedence over the global `GKE_MAX_PODS_PER_NODE` environment variable.
 *   `enableAutorepair`: (Optional) `true` or `false` to enable/disable node auto-repair. Defaults to `nil` (GKE default).
 *   `placementPolicy`: (Optional) The placement policy for the nodes (e.g., `COMPACT` or `tpu-provisioner-4x4x4`).
+
+##### Global Defaults (Environment Variables)
+
+Some configuration parameters are set via environment variables for the provisioner itself. These provide the default values for nodepools managed by the provisioner:
+
+*   `GKE_MAX_PODS_PER_NODE`: (Optional) The maximum number of pods that can run on a node. Defaults to `15`. 
+    *   For **dynamic nodepools**, this is used for all provisioned node pools.
+    *   For **static nodepools**, this is the default value if `maxPodsPerNode` is not specified in the 
+    `tpu-provisioner-static-nodepools-config` `ConfigMap`.
+    
+    In GKE, the system default is 110. For large clusters, using the default of 110 can result in quickly exceeding the available IP space in the cluster's pod IP range. Setting a lower value like the `tpu-provisioner` default of 15 is recommended for TPU-intensive workloads where each node typically only runs a single large pod.
 
 Some configuration parameters come from environment variables rather than the configmap, particularly those that are shared across both statically and dynamically created nodepools managed by the provisioner. This includes the following environment variables typically set in the manager configmap (note that the `STATIC_NODEPOOL_CREATE_CONCURRENCY` environment variable is distinct from the `CONCURRENCY` environment variable to allow for separate nodepool create operation limits between static and dynamic nodepools):
 
@@ -254,6 +265,7 @@ GCP_CLUSTER: test-cluster
 GCP_NODE_ADDITIONAL_NETWORKS: test-network:test-subnet
 GCP_NODE_TAGS: test-tag
 GCP_NODE_SERVICE_ACCOUNT: my-service-account-email
+GKE_MAX_PODS_PER_NODE: "15"
 ```
 
 Nodepools created by the static provisioner are labeled with `tpu-provisioner-static-nodepool` in order to ensure that their lifecycle is managed independently of dynamic nodepools. Nodepools with this label are omitted from the standard garbage collection loop used for dynamically-provisioned nodepools, and are instead cleaned up when their corresponding subblock, block, or reservation specifications are removed from the configmap.

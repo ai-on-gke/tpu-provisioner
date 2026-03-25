@@ -36,6 +36,7 @@ func TestParseEnv(t *testing.T) {
 			want: Config{
 				Provider:                        "gke",
 				GCPNodeSecureBoot:               true,
+				GKEMaxPodsPerNode:               16,
 				NodeMinLifespan:                 10 * time.Second,
 				NodepoolDeletionDelay:           30 * time.Second,
 				PodResourceType:                 "google.com/tpu",
@@ -56,6 +57,7 @@ func TestParseEnv(t *testing.T) {
 				"SLICE_RECREATE_CONDITIONS":      "Reason1,Reason2:'substring'",
 				"NODE_MIN_LIFESPAN":              "5s",
 				"STATIC_NODEPOOL_CREATE_TIMEOUT": "5m",
+				"GKE_MAX_PODS_PER_NODE":          "18",
 			},
 			want: Config{
 				Provider:                        "mock",
@@ -63,6 +65,7 @@ func TestParseEnv(t *testing.T) {
 				GCPClusterLocation:              "us-central1",
 				SliceRecreateConditions:         []string{"Reason1", "Reason2:'substring'"},
 				GCPNodeSecureBoot:               true,
+				GKEMaxPodsPerNode:               18,
 				NodeMinLifespan:                 5 * time.Second,
 				NodepoolDeletionDelay:           30 * time.Second,
 				PodResourceType:                 "google.com/tpu",
