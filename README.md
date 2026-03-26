@@ -165,3 +165,11 @@ Test that you can apply a TPU Job.
 ```bash
 kubectl apply -f ./examples/v4-2x2x4/
 ```
+
+### Global Defaults (Environment Variables)
+
+Some configuration parameters are set via environment variables for the provisioner itself. These provide the default values for nodepools managed by the provisioner:
+
+*   `GKE_MAX_PODS_PER_NODE`: (Optional) The maximum number of pods that can run on a node. Defaults to `16`.
+
+    In GKE, the system default is 110. For large clusters, using the default of 110 can result in quickly exceeding the available IP space in the cluster's pod IP range. Setting a lower value like the `tpu-provisioner` default of 16 is recommended for TPU-intensive workloads where each node typically only runs a single large pod.

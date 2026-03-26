@@ -93,6 +93,8 @@ func main() {
 		// the Pod requests a reservation or spot.
 		GCPForceOnDemand bool `envconfig:"GCP_FORCE_ON_DEMAND" default:"false"`
 
+		GKEMaxPodsPerNode int `envconfig:"GKE_MAX_PODS_PER_NODE" default:"16"`
+
 		// NodeMinLifespan is the amount of time that should pass between a Node object
 		// creation and a cleanup of that Node. This is mostly irrelevant now that JobSet
 		// existance is checked before deleting a NodePool.
@@ -196,6 +198,7 @@ func main() {
 			"nodeServiceAccount", cfg.GCPNodeServiceAccount,
 			"nodeTags", cfg.GCPNodeTags,
 			"podToNodeLabels", cfg.GCPPodToNodeLabels,
+			"maxPodsPerNode", cfg.GKEMaxPodsPerNode,
 		)
 
 		clusterCtx := cloud.GKEContext{
@@ -213,6 +216,7 @@ func main() {
 			PodToNodeLabels:         cfg.GCPPodToNodeLabels,
 			NodeSecureBoot:          cfg.GCPNodeSecureBoot,
 			ForceOnDemand:           cfg.GCPForceOnDemand,
+			MaxPodsPerNode:          cfg.GKEMaxPodsPerNode,
 		}
 
 		containers, err := containerv1beta1.NewService(context.Background() /*, option.WithCredentials(creds)*/)
