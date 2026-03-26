@@ -18,11 +18,12 @@ func TestJobsetSlices(t *testing.T) {
 	uid := string(testUID)
 
 	tests := []struct {
-		name      string
-		jobSet    *jobset.JobSet
-		want      []v1beta1.Slice
-		wantErr   bool
-		errSubstr string
+		name            string
+		jobSet          *jobset.JobSet
+		want            []v1beta1.Slice
+		wantLegacyNames map[string]string
+		wantErr         bool
+		errSubstr       string
 	}{
 		{
 			name: "basic JobSet with single replicated job and single replica",
@@ -472,6 +473,9 @@ func TestJobsetSlices(t *testing.T) {
 			want: []v1beta1.Slice{
 				makeSliceWithJobSet(utils.SliceName("this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", uid, "long-replicated-job-name", 0), tpu7xAccelerator, "4x4x4", "this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", "default"),
 			},
+			wantLegacyNames: map[string]string{
+				utils.SliceName("this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", uid, "long-replicated-job-name", 0): utils.LegacySliceName("this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", uid, "long-replicated-job-name", 0),
+			},
 			wantErr: false,
 		},
 		{
@@ -529,6 +533,9 @@ func TestJobsetSlices(t *testing.T) {
 			},
 			want: []v1beta1.Slice{
 				makeSlice(utils.SliceName("test-jobset", uid, "v7x-worker", 0), "4x4x4"),
+			},
+			wantLegacyNames: map[string]string{
+				utils.SliceName("test-jobset", uid, "v7x-worker", 0): utils.LegacySliceName("test-jobset", uid, "v7x-worker", 0),
 			},
 			wantErr: false,
 		},
@@ -636,7 +643,7 @@ func TestJobsetSlices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := jobsetSlices(tt.jobSet)
+			got, gotLegacyNames, err := jobsetSlices(tt.jobSet)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("jobsetSlices() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -649,6 +656,12 @@ func TestJobsetSlices(t *testing.T) {
 			}
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("jobsetSlices() mismatch (-want +got):\n%s", diff)
+			}
+			if tt.wantLegacyNames == nil {
+				tt.wantLegacyNames = map[string]string{}
+			}
+			if diff := cmp.Diff(tt.wantLegacyNames, gotLegacyNames); diff != "" {
+				t.Errorf("jobsetSlices() legacyNames mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

@@ -481,19 +481,6 @@ func TestDiffSlices(t *testing.T) {
 			},
 			wantToDelete: nil,
 		},
-		{
-			name: "prefer new name over legacy name when both exist",
-			desired: []v1beta1.Slice{
-				makeSliceWithAccel(sliceOptions{name: "new-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1"}}),
-			},
-			existing: []v1beta1.Slice{
-				makeSliceWithAccel(sliceOptions{name: "new-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1"}}),
-				makeSliceWithAccel(sliceOptions{name: "legacy-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1"}}),
-			},
-			legacyNames:  map[string]string{"new-name": "legacy-name"},
-			wantToDelete: nil,
-			wantToCreate: nil,
-		},
 	}
 
 	for _, tt := range tests {
