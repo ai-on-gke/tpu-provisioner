@@ -668,6 +668,118 @@ var _ = Describe("Slice controller", func() {
 			return updatedSliceList.Items[0].UID, nil
 		}, timeout, interval).ShouldNot(Equal(initialUID))
 	})
+
+	It("should treat an existing Slice with a legacy name as a match and not recreate it", func() {
+		ctx := context.Background()
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-ns-legacy-",
+			},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		defer func() {
+			Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
+		}()
+
+		// Use a name long enough that the new (24-char) and legacy (32-char) truncation limits
+		// produce different slice names.
+		js := constructJobSet("test-js-legacy-name-that-is-long-enough",
+			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeAsync),
+			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["legacy-cube-0"]]}`),
+			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
+		)
+		js.Namespace = ns.Name
+
+		By("Creating the JobSet")
+		Expect(k8sClient.Create(ctx, js)).To(Succeed())
+
+		// Wait for the controller to create the Slice with the new name.
+		By("Waiting for the controller to create the initial Slice")
+		var sliceList v1beta1.SliceList
+		Eventually(func() int {
+			k8sClient.List(ctx, &sliceList, client.MatchingLabels{
+				controller.SliceOwnerNameLabel:      js.Name,
+				controller.SliceOwnerNamespaceLabel: ns.Name,
+			})
+			return len(sliceList.Items)
+		}, timeout, interval).Should(Equal(1))
+
+		newSlice := sliceList.Items[0]
+		newName := newSlice.Name
+
+		// Compute the legacy name for this JobSet/worker/0.
+		legacyName := utils.LegacySliceName(js.Name, string(js.UID), "worker", 0)
+
+		// Skip this test if the names happen to be the same (short name, no truncation difference).
+		if newName == legacyName {
+			Skip("New and legacy names are identical for this JobSet — no legacy migration to test")
+		}
+
+		By("Creating a legacy-named Slice alongside the existing new-named Slice")
+		legacySlice := &v1beta1.Slice{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: legacyName,
+				Labels: map[string]string{
+					controller.SliceOwnerKindLabel:      "jobset",
+					controller.SliceOwnerNameLabel:      js.Name,
+					controller.SliceOwnerNamespaceLabel: ns.Name,
+				},
+			},
+			Spec: v1beta1.SliceSpec{
+				Type:         "tpu7x",
+				Topology:     "4x4x4",
+				PartitionIds: []string{"legacy-cube-0"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, legacySlice)).To(Succeed())
+		legacyUID := legacySlice.UID
+
+		By("Deleting the new-named Slice so only the legacy-named Slice remains")
+		Expect(k8sClient.Delete(ctx, &newSlice)).To(Succeed())
+
+		// Wait for the new-named slice to be fully gone and controller to stabilize.
+		Eventually(func() []string {
+			var list v1beta1.SliceList
+			k8sClient.List(ctx, &list, client.MatchingLabels{
+				controller.SliceOwnerNameLabel:      js.Name,
+				controller.SliceOwnerNamespaceLabel: ns.Name,
+			})
+			var names []string
+			for _, s := range list.Items {
+				names = append(names, s.Name)
+			}
+			return names
+		}, timeout, interval).Should(ConsistOf(legacyName))
+
+		By("Triggering a reconcile by touching the JobSet annotation")
+		var updatedJS jobset.JobSet
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(js), &updatedJS)).To(Succeed())
+		if updatedJS.Annotations == nil {
+			updatedJS.Annotations = map[string]string{}
+		}
+		updatedJS.Annotations["test-trigger"] = "reconcile"
+		Expect(k8sClient.Update(ctx, &updatedJS)).To(Succeed())
+
+		By("Verifying the legacy-named Slice is NOT deleted and no new Slice is created")
+		Consistently(func() int {
+			var list v1beta1.SliceList
+			k8sClient.List(ctx, &list, client.MatchingLabels{
+				controller.SliceOwnerNameLabel:      js.Name,
+				controller.SliceOwnerNamespaceLabel: ns.Name,
+			})
+			return len(list.Items)
+		}, 5*time.Second, interval).Should(Equal(1))
+
+		// Verify it's the same Slice (same UID, same legacy name — not recreated).
+		var finalList v1beta1.SliceList
+		Expect(k8sClient.List(ctx, &finalList, client.MatchingLabels{
+			controller.SliceOwnerNameLabel:      js.Name,
+			controller.SliceOwnerNamespaceLabel: ns.Name,
+		})).To(Succeed())
+		Expect(finalList.Items).To(HaveLen(1))
+		Expect(finalList.Items[0].UID).To(Equal(legacyUID))
+		Expect(finalList.Items[0].Name).To(Equal(legacyName))
+	})
 })
 
 // JobSetOption is a function that modifies a JobSet.

@@ -53,9 +53,24 @@ type diffedSlice struct {
 	reason string
 }
 
+// lookupExistingSlice finds an existing slice by its desired name, falling back to legacy names
+// for backwards compatibility. Returns the existing slice and whether it was found.
+func lookupExistingSlice(desiredName string, existingMap map[string]*v1beta1.Slice, legacyNames map[string]string) (*v1beta1.Slice, bool) {
+	if s, ok := existingMap[desiredName]; ok {
+		return s, true
+	}
+	if legacyName, ok := legacyNames[desiredName]; ok {
+		if s, ok := existingMap[legacyName]; ok {
+			return s, true
+		}
+	}
+	return nil, false
+}
+
 // diffSlices compares desired slices with existing slices and returns
-// lists of slices to delete and create.
-func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, now time.Time, recreateConditionReasons []RecreateCondition, conditionalRecreateWait time.Duration) (toDelete, toCreate []diffedSlice, requeueAfter time.Duration) {
+// lists of slices to delete and create. legacyNames maps new desired names to
+// their legacy equivalents for backwards-compatible matching of existing slices.
+func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, legacyNames map[string]string, now time.Time, recreateConditionReasons []RecreateCondition, conditionalRecreateWait time.Duration) (toDelete, toCreate []diffedSlice, requeueAfter time.Duration) {
 	// Create a map of existing slices by name for quick lookup
 	existingMap := make(map[string]*v1beta1.Slice)
 	for i := range existing {
@@ -64,7 +79,7 @@ func diffSlices(desired []v1beta1.Slice, existing []v1beta1.Slice, now time.Time
 
 	// Check each desired slice
 	for _, desiredSlice := range desired {
-		if existingSlice, exists := existingMap[desiredSlice.Name]; exists {
+		if existingSlice, exists := lookupExistingSlice(desiredSlice.Name, existingMap, legacyNames); exists {
 			// Slice exists - check if partitions have changed
 			if !partitionsEqual(existingSlice.Spec.PartitionIds, desiredSlice.Spec.PartitionIds) {
 				// NodeSelector changed - delete existing (creation will happen in next reconcile)
@@ -142,7 +157,8 @@ func ParseRecreateConditions(raw []string) []RecreateCondition {
 }
 
 // allSlicesReady checks if all desired Slices exist and have the Ready condition set to true.
-func allSlicesReady(desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice) bool {
+// legacyNames maps new desired names to their legacy equivalents for backwards compatibility.
+func allSlicesReady(desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice, legacyNames map[string]string) bool {
 	if len(desiredSlices) == 0 {
 		return true
 	}
@@ -155,7 +171,7 @@ func allSlicesReady(desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slic
 
 	// Check that all desired slices exist and are Ready
 	for _, desired := range desiredSlices {
-		existing, exists := existingMap[desired.Name]
+		existing, exists := lookupExistingSlice(desired.Name, existingMap, legacyNames)
 		if !exists {
 			// Slice doesn't exist yet
 			return false

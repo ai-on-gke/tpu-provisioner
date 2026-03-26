@@ -99,14 +99,14 @@ func (r *LeaderWorkerSetSliceReconciler) Reconcile(ctx context.Context, req ctrl
 		}
 	}
 
-	desiredSlices, err := lwsSlices(&lwset)
+	desiredSlices, legacyNames, err := lwsSlices(&lwset)
 	if err != nil {
 		log.Error(err, "Error converting LeaderWorkerSet to Slices")
 		return ctrl.Result{}, nil
 	}
 
 	// Determine which slices to delete and create
-	toDelete, toCreate, diffRequeueAfter := diffSlices(desiredSlices, existingSliceList.Items, now, r.RecreateConditions, r.ConditionalRecreateWait)
+	toDelete, toCreate, diffRequeueAfter := diffSlices(desiredSlices, existingSliceList.Items, legacyNames, now, r.RecreateConditions, r.ConditionalRecreateWait)
 
 	applyRequeueAfter, err := applySliceChanges(ctx, r.Client, r.Recorder, &lwset, toDelete, toCreate)
 	if err != nil {
@@ -170,13 +170,16 @@ type lwsReplicaSelection struct {
 	Workers [][]string `json:"workers"`
 }
 
-func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
+// lwsSlices returns the desired slices for a LeaderWorkerSet along with a legacy
+// name map (new name -> legacy name) for backwards-compatible matching.
+func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, map[string]string, error) {
 	var slices []v1beta1.Slice
+	legacyNames := make(map[string]string)
 
 	// Parse slice selection annotation if present
 	selection, err := parseLWSSliceSelection(lwset)
 	if err != nil {
-		return nil, fmt.Errorf("parsing slice selection: %w", err)
+		return nil, nil, fmt.Errorf("parsing slice selection: %w", err)
 	}
 
 	replicas := 1
@@ -195,9 +198,15 @@ func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 			var partitionIds []string
 			partitionIds = append(partitionIds, selection.Leader...)
 
+			newName := utils.LWSSliceName(lwset.Name, string(lwset.UID), "leader", -1)
+			legacyName := utils.LegacyLWSSliceName(lwset.Name, string(lwset.UID), "leader", -1)
+			if newName != legacyName {
+				legacyNames[newName] = legacyName
+			}
+
 			slices = append(slices, v1beta1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: utils.LWSSliceName(lwset.Name, string(lwset.UID), "leader", -1),
+					Name: newName,
 					Labels: map[string]string{
 						SliceOwnerKindLabel:      LWSOwnerKind,
 						SliceOwnerNameLabel:      lwset.Name,
@@ -227,9 +236,15 @@ func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 				partitionIds = append(partitionIds, selection.Workers[i]...)
 			}
 
+			newName := utils.LWSSliceName(lwset.Name, string(lwset.UID), "worker", i)
+			legacyName := utils.LegacyLWSSliceName(lwset.Name, string(lwset.UID), "worker", i)
+			if newName != legacyName {
+				legacyNames[newName] = legacyName
+			}
+
 			slices = append(slices, v1beta1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: utils.LWSSliceName(lwset.Name, string(lwset.UID), "worker", i),
+					Name: newName,
 					Labels: map[string]string{
 						SliceOwnerKindLabel:      LWSOwnerKind,
 						SliceOwnerNameLabel:      lwset.Name,
@@ -245,7 +260,7 @@ func lwsSlices(lwset *lws.LeaderWorkerSet) ([]v1beta1.Slice, error) {
 		}
 	}
 
-	return slices, nil
+	return slices, legacyNames, nil
 }
 
 // parseLWSSliceSelection returns the slice selection from the annotation.

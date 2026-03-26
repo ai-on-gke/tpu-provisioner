@@ -96,14 +96,14 @@ func (r *JobSetSliceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	desiredSlices, err := jobsetSlices(&js)
+	desiredSlices, legacyNames, err := jobsetSlices(&js)
 	if err != nil {
 		log.Error(err, "Error converting JobSet to Slices")
 		return ctrl.Result{}, nil
 	}
 
 	// Determine which slices to delete and create
-	toDelete, toCreate, diffRequeueAfter := diffSlices(desiredSlices, existingSliceList.Items, now, r.RecreateConditions, r.ConditionalRecreateWait)
+	toDelete, toCreate, diffRequeueAfter := diffSlices(desiredSlices, existingSliceList.Items, legacyNames, now, r.RecreateConditions, r.ConditionalRecreateWait)
 	if diffRequeueAfter > 0 {
 		log.Info("Some Slices need to be deleted, but are in a state that requires requeuing", "requeueAfter", diffRequeueAfter)
 	}
@@ -117,7 +117,7 @@ func (r *JobSetSliceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Handle sync mode: suspend JobSet until all Slices are Ready
 	if utils.GetProvisioningMode(&js) == utils.SliceProvisioningModeSync {
-		if err := r.handleSyncMode(ctx, &js, desiredSlices, existingSliceList.Items); err != nil {
+		if err := r.handleSyncMode(ctx, &js, desiredSlices, existingSliceList.Items, legacyNames); err != nil {
 			return ctrl.Result{}, fmt.Errorf("handling sync mode: %w", err)
 		}
 	}
@@ -179,12 +179,15 @@ func (r *JobSetSliceReconciler) sliceToJobSetRequests(ctx context.Context, obj c
 	}
 }
 
-func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, error) {
+// jobsetSlices returns the desired slices for a JobSet along with a legacy name
+// map (new name -> legacy name) for backwards-compatible matching.
+func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, map[string]string, error) {
 	var slices []v1beta1.Slice
+	legacyNames := make(map[string]string)
 
 	sliceSelection, err := parseJobSetSliceSelection(js)
 	if err != nil {
-		return nil, fmt.Errorf("parsing slice selection: %w", err)
+		return nil, nil, fmt.Errorf("parsing slice selection: %w", err)
 	}
 
 	usedPartitions := make(map[string]bool)
@@ -211,9 +214,15 @@ func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, error) {
 
 		cubeSelection := sliceSelection[rj.Name]
 		for i := 0; i < int(rj.Replicas); i++ {
+			newName := utils.SliceName(js.Name, string(js.UID), rj.Name, i)
+			legacyName := utils.LegacySliceName(js.Name, string(js.UID), rj.Name, i)
+			if newName != legacyName {
+				legacyNames[newName] = legacyName
+			}
+
 			s := v1beta1.Slice{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: utils.SliceName(js.Name, string(js.UID), rj.Name, i),
+					Name: newName,
 					Labels: map[string]string{
 						// Track ownership with labels (can't use owner references since Slice is Cluster scoped)
 						SliceOwnerKindLabel:      jobSetOwnerKind,
@@ -234,22 +243,22 @@ func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, error) {
 			// Check for internal overlap in the desired state
 			for _, p := range s.Spec.PartitionIds {
 				if usedPartitions[p] {
-					return nil, fmt.Errorf("duplicate partition ID %q found in slice selection", p)
+					return nil, nil, fmt.Errorf("duplicate partition ID %q found in slice selection", p)
 				}
 				usedPartitions[p] = true
 			}
 		}
 	}
 
-	return slices, nil
+	return slices, legacyNames, nil
 }
 
 // handleSyncMode handles the sync provisioning mode by suspending the JobSet
 // until all expected Slices are Ready, then unsuspending it.
-func (r *JobSetSliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet, desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice) error {
+func (r *JobSetSliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet, desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice, legacyNames map[string]string) error {
 	log := ctrllog.FromContext(ctx)
 
-	slicesReady := allSlicesReady(desiredSlices, existingSlices)
+	slicesReady := allSlicesReady(desiredSlices, existingSlices, legacyNames)
 	jsCurrentlySuspended := js.Spec.Suspend != nil && *js.Spec.Suspend
 
 	if slicesReady && jsCurrentlySuspended {

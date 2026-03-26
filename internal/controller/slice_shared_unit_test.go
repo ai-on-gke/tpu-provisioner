@@ -140,6 +140,7 @@ func TestDiffSlices(t *testing.T) {
 		name                     string
 		desired                  []v1beta1.Slice
 		existing                 []v1beta1.Slice
+		legacyNames              map[string]string
 		recreateConditionReasons []RecreateCondition
 		conditionalRecreateWait  time.Duration
 		wantToDelete             []expectedDiff
@@ -442,11 +443,62 @@ func TestDiffSlices(t *testing.T) {
 			wantToCreate:             nil,
 			wantRequeueAfter:         15 * time.Minute,
 		},
+		{
+			name: "match existing slice by legacy name (no create, no delete)",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "new-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "legacy-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1"}}),
+			},
+			legacyNames:  map[string]string{"new-name": "legacy-name"},
+			wantToDelete: nil,
+			wantToCreate: nil,
+		},
+		{
+			name: "delete legacy-named slice when partitions changed",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "new-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1", "cube-2"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "legacy-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-3"}}),
+			},
+			legacyNames: map[string]string{"new-name": "legacy-name"},
+			wantToDelete: []expectedDiff{
+				{name: "legacy-name", reason: "partition IDs changed"},
+			},
+			wantToCreate: nil,
+		},
+		{
+			name: "create new slice when neither new nor legacy name exists",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "new-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1"}}),
+			},
+			existing:    []v1beta1.Slice{},
+			legacyNames: map[string]string{"new-name": "legacy-name"},
+			wantToCreate: []expectedDiff{
+				{name: "new-name", reason: "desired slice does not exist"},
+			},
+			wantToDelete: nil,
+		},
+		{
+			name: "prefer new name over legacy name when both exist",
+			desired: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "new-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1"}}),
+			},
+			existing: []v1beta1.Slice{
+				makeSliceWithAccel(sliceOptions{name: "new-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1"}}),
+				makeSliceWithAccel(sliceOptions{name: "legacy-name", accelType: "tpu-v7x", topology: "4x4x8", partitions: []string{"cube-1"}}),
+			},
+			legacyNames:  map[string]string{"new-name": "legacy-name"},
+			wantToDelete: nil,
+			wantToCreate: nil,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotToDelete, gotToCreate, gotRequeueAfter := diffSlices(tt.desired, tt.existing, fakeNow, tt.recreateConditionReasons, tt.conditionalRecreateWait)
+			gotToDelete, gotToCreate, gotRequeueAfter := diffSlices(tt.desired, tt.existing, tt.legacyNames, fakeNow, tt.recreateConditionReasons, tt.conditionalRecreateWait)
 
 			compareSlices := func(msg string, want []expectedDiff, got []diffedSlice) {
 				if len(want) != len(got) {

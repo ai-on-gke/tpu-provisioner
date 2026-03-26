@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +17,7 @@ import (
 
 func TestLWSSlices(t *testing.T) {
 	testUID := types.UID("test-uid-lws")
+	uid := string(testUID)
 
 	tests := []struct {
 		name      string
@@ -50,7 +52,7 @@ func TestLWSSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpu7xAccelerator, "4x4x4", "test-lws", "default"),
+				makeLWSSlice(utils.LWSSliceName("test-lws", uid, "worker", 0), tpu7xAccelerator, "4x4x4", "test-lws", "default"),
 			},
 			wantErr: false,
 		},
@@ -81,9 +83,9 @@ func TestLWSSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpu7xAccelerator, "4x4x4", "test-lws", "default"),
-				makeLWSSlice("lws-test-lws-test-uid-worker-1", tpu7xAccelerator, "4x4x4", "test-lws", "default"),
-				makeLWSSlice("lws-test-lws-test-uid-worker-2", tpu7xAccelerator, "4x4x4", "test-lws", "default"),
+				makeLWSSlice(utils.LWSSliceName("test-lws", uid, "worker", 0), tpu7xAccelerator, "4x4x4", "test-lws", "default"),
+				makeLWSSlice(utils.LWSSliceName("test-lws", uid, "worker", 1), tpu7xAccelerator, "4x4x4", "test-lws", "default"),
+				makeLWSSlice(utils.LWSSliceName("test-lws", uid, "worker", 2), tpu7xAccelerator, "4x4x4", "test-lws", "default"),
 			},
 			wantErr: false,
 		},
@@ -117,8 +119,8 @@ func TestLWSSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpuV7xAccelerator, "4x4x8", "test-lws", "default", "cube-1", "cube-2"),
-				makeLWSSlice("lws-test-lws-test-uid-worker-1", tpuV7xAccelerator, "4x4x8", "test-lws", "default", "cube-3", "cube-4"),
+				makeLWSSlice(utils.LWSSliceName("test-lws", uid, "worker", 0), tpuV7xAccelerator, "4x4x8", "test-lws", "default", "cube-1", "cube-2"),
+				makeLWSSlice(utils.LWSSliceName("test-lws", uid, "worker", 1), tpuV7xAccelerator, "4x4x8", "test-lws", "default", "cube-3", "cube-4"),
 			},
 			wantErr: false,
 		},
@@ -164,8 +166,8 @@ func TestLWSSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeLWSSlice("lws-test-lws-test-uid-leader", tpu7xAccelerator, "4x4x4", "test-lws", "default", "cube-0"),
-				makeLWSSlice("lws-test-lws-test-uid-worker-0", tpu7xAccelerator, "4x4x8", "test-lws", "default", "cube-1", "cube-2"),
+				makeLWSSlice(utils.LWSSliceName("test-lws", uid, "leader", -1), tpu7xAccelerator, "4x4x4", "test-lws", "default", "cube-0"),
+				makeLWSSlice(utils.LWSSliceName("test-lws", uid, "worker", 0), tpu7xAccelerator, "4x4x8", "test-lws", "default", "cube-1", "cube-2"),
 			},
 			wantErr: false,
 		},
@@ -205,7 +207,7 @@ func TestLWSSlices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := lwsSlices(tt.lwset)
+			got, _, err := lwsSlices(tt.lwset)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("lwsSlices() error = %v, wantErr %v", err, tt.wantErr)
 				return
