@@ -6,6 +6,16 @@ SA ?= tpu-provisioner@replace-with-your-project.iam.gserviceaccount.com
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.26.0
 
+# Workaround for golang/go#75031: auto-downloaded toolchains may be missing the covdata tool
+GOTOOLCHAIN ?= auto
+ifeq (auto,$(GOTOOLCHAIN))
+ifeq (,$(FORCE_HOST_GO))
+    export GOTOOLCHAIN=$(shell awk '/^toolchain go/ {print $$2}; /^go / {print "go"$$2}' go.mod | head -n1)
+else
+    export GOTOOLCHAIN=local
+endif
+endif
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -55,11 +65,18 @@ vet: ## Run go vet against code.
 JOBSET_VERSION ?= "v0.5.0"
 LWS_VERSION ?= "v0.8.0"
 
-.PHONY: test
-test: manifests fmt vet envtest ## Run tests.
+.PHONY: test-unit
+test-unit: manifests fmt vet ## Run unit tests.
+	go test ./cmd/... ./internal/... -v -coverprofile cover-unit.out
+
+.PHONY: test-integration
+test-integration: manifests fmt vet envtest ## Run integration tests.
 	curl -L https://github.com/kubernetes-sigs/jobset/releases/download/$(JOBSET_VERSION)/manifests.yaml > test/crds/jobset-$(JOBSET_VERSION).yaml
 	curl -L https://github.com/kubernetes-sigs/lws/releases/download/$(LWS_VERSION)/manifests.yaml > test/crds/lws-$(LWS_VERSION).yaml
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -v -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./test/integration/... -v -coverprofile cover-integration.out
+
+.PHONY: test
+test: test-unit test-integration ## Run all tests.
 
 ##@ Build
 

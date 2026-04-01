@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	"github.com/google/go-cmp/cmp"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -14,13 +15,15 @@ import (
 
 func TestJobsetSlices(t *testing.T) {
 	testUID := types.UID("test-uid-12345678")
+	uid := string(testUID)
 
 	tests := []struct {
-		name      string
-		jobSet    *jobset.JobSet
-		want      []v1beta1.Slice
-		wantErr   bool
-		errSubstr string
+		name            string
+		jobSet          *jobset.JobSet
+		want            []v1beta1.Slice
+		wantLegacyNames map[string]string
+		wantErr         bool
+		errSubstr       string
 	}{
 		{
 			name: "basic JobSet with single replicated job and single replica",
@@ -56,7 +59,7 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-0", "4x4x4"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker", 0), "4x4x4"),
 			},
 			wantErr: false,
 		},
@@ -94,9 +97,9 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-0", "4x4x4"),
-				makeSlice("js-test-jobset-test-uid-worker-1", "4x4x4"),
-				makeSlice("js-test-jobset-test-uid-worker-2", "4x4x4"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker", 0), "4x4x4"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker", 1), "4x4x4"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker", 2), "4x4x4"),
 			},
 			wantErr: false,
 		},
@@ -154,9 +157,9 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-1-0", "4x4x4"),
-				makeSlice("js-test-jobset-test-uid-worker-1-1", "4x4x4"),
-				makeSlice("js-test-jobset-test-uid-worker-2-0", "4x4x8"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker-1", 0), "4x4x4"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker-1", 1), "4x4x4"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker-2", 0), "4x4x8"),
 			},
 			wantErr: false,
 		},
@@ -347,8 +350,8 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-0", "4x4x8", "cube-1", "cube-2"),
-				makeSlice("js-test-jobset-test-uid-worker-1", "4x4x8", "cube-3", "cube-4"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker", 0), "4x4x8", "cube-1", "cube-2"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker", 1), "4x4x8", "cube-3", "cube-4"),
 			},
 			wantErr: false,
 		},
@@ -429,8 +432,8 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-worker-0", "4x4x8", "cube-1", "cube-2"),
-				makeSlice("js-test-jobset-test-uid-worker-1", "4x4x8"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker", 0), "4x4x8", "cube-1", "cube-2"),
+				makeSlice(utils.SliceName("test-jobset", uid, "worker", 1), "4x4x8"),
 			},
 			wantErr: false,
 		},
@@ -468,7 +471,10 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSliceWithJobSet("js-this-is-a-very-long-jobset-name--test-uid-long-repli-0", tpu7xAccelerator, "4x4x4", "this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", "default"),
+				makeSliceWithJobSet(utils.SliceName("this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", uid, "long-replicated-job-name", 0), tpu7xAccelerator, "4x4x4", "this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", "default"),
+			},
+			wantLegacyNames: map[string]string{
+				utils.SliceName("this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", uid, "long-replicated-job-name", 0): utils.LegacySliceName("this-is-a-very-long-jobset-name-that-exceeds-the-character-limit", uid, "long-replicated-job-name", 0),
 			},
 			wantErr: false,
 		},
@@ -526,7 +532,10 @@ func TestJobsetSlices(t *testing.T) {
 				},
 			},
 			want: []v1beta1.Slice{
-				makeSlice("js-test-jobset-test-uid-v7x-worker-0", "4x4x4"),
+				makeSlice(utils.SliceName("test-jobset", uid, "v7x-worker", 0), "4x4x4"),
+			},
+			wantLegacyNames: map[string]string{
+				utils.SliceName("test-jobset", uid, "v7x-worker", 0): utils.LegacySliceName("test-jobset", uid, "v7x-worker", 0),
 			},
 			wantErr: false,
 		},
@@ -634,7 +643,7 @@ func TestJobsetSlices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := jobsetSlices(tt.jobSet)
+			got, gotLegacyNames, err := jobsetSlices(tt.jobSet)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("jobsetSlices() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -647,6 +656,12 @@ func TestJobsetSlices(t *testing.T) {
 			}
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("jobsetSlices() mismatch (-want +got):\n%s", diff)
+			}
+			if tt.wantLegacyNames == nil {
+				tt.wantLegacyNames = map[string]string{}
+			}
+			if diff := cmp.Diff(tt.wantLegacyNames, gotLegacyNames); diff != "" {
+				t.Errorf("jobsetSlices() legacyNames mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
