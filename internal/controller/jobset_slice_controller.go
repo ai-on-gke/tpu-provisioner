@@ -78,10 +78,11 @@ func (r *JobSetSliceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// Remove finalizer once all deletion requests have been issued
 		// (don't wait for Slices to be fully deleted/finalized)
 		if controllerutil.ContainsFinalizer(&js, SliceCleanupFinalizer) {
-			log.Info("Removing finalizer from JobSet", "finalizer", SliceCleanupFinalizer)
+			log.Info("Patching JobSet to remove finalizer", "finalizer", SliceCleanupFinalizer)
+			patch := client.MergeFrom(js.DeepCopy())
 			controllerutil.RemoveFinalizer(&js, SliceCleanupFinalizer)
-			if err := r.Update(ctx, &js); err != nil {
-				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+			if err := r.Patch(ctx, &js, patch); err != nil {
+				return ctrl.Result{}, fmt.Errorf("patching jobset to remove finalizer: %w", err)
 			}
 		}
 		return ctrl.Result{}, nil
@@ -89,10 +90,11 @@ func (r *JobSetSliceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Add finalizer if not present
 	if !controllerutil.ContainsFinalizer(&js, SliceCleanupFinalizer) {
-		log.Info("Adding finalizer to JobSet", "finalizer", SliceCleanupFinalizer)
+		log.Info("Patching JobSet to add finalizer", "finalizer", SliceCleanupFinalizer)
+		patch := client.MergeFrom(js.DeepCopy())
 		controllerutil.AddFinalizer(&js, SliceCleanupFinalizer)
-		if err := r.Update(ctx, &js); err != nil {
-			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
+		if err := r.Patch(ctx, &js, patch); err != nil {
+			return ctrl.Result{}, fmt.Errorf("patching jobset to add finalizer: %w", err)
 		}
 	}
 
@@ -264,11 +266,12 @@ func (r *JobSetSliceReconciler) handleSyncMode(ctx context.Context, js *jobset.J
 	if slicesReady && jsCurrentlySuspended {
 		// All slices are ready, unsuspend the JobSet
 		log.Info("All Slices are Ready, unsuspending JobSet")
+		patch := client.MergeFrom(js.DeepCopy())
 		suspendValue := false
 		js.Spec.Suspend = &suspendValue
-		if err := r.Update(ctx, js); err != nil {
+		if err := r.Patch(ctx, js, patch); err != nil {
 			r.Recorder.Event(js, corev1.EventTypeNormal, "JobSetUnsuspendFailed", "Failed to unsuspend JobSet")
-			return fmt.Errorf("unsuspending jobset: %w", err)
+			return fmt.Errorf("patching jobset to unsuspend: %w", err)
 		}
 		r.Recorder.Event(js, corev1.EventTypeNormal, "JobSetUnsuspended", "All Slices are Ready")
 	} else if !slicesReady && !jsCurrentlySuspended {
@@ -276,11 +279,12 @@ func (r *JobSetSliceReconciler) handleSyncMode(ctx context.Context, js *jobset.J
 		log.Info("Not all Slices are Ready, suspending JobSet",
 			"readyCount", countReadySlices(existingSlices),
 			"expectedCount", len(desiredSlices))
+		patch := client.MergeFrom(js.DeepCopy())
 		suspendValue := true
 		js.Spec.Suspend = &suspendValue
-		if err := r.Update(ctx, js); err != nil {
+		if err := r.Patch(ctx, js, patch); err != nil {
 			r.Recorder.Event(js, corev1.EventTypeNormal, "JobSetSuspendFailed", "Failed to suspend JobSet")
-			return fmt.Errorf("suspending jobset: %w", err)
+			return fmt.Errorf("patching jobset to suspend: %w", err)
 		}
 		r.Recorder.Event(js, corev1.EventTypeNormal, "JobSetSuspended", "Waiting for all Slices to be Ready")
 	}
