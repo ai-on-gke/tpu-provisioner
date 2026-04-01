@@ -4,7 +4,7 @@ IMG ?= controller:latest
 # Image URL to use all building/pushing image targets
 SA ?= tpu-provisioner@replace-with-your-project.iam.gserviceaccount.com
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.31.0
+ENVTEST_K8S_VERSION = 1.32.0
 
 # Workaround for golang/go#75031: auto-downloaded toolchains may be missing the covdata tool
 GOTOOLCHAIN ?= auto
@@ -62,7 +62,7 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
-JOBSET_VERSION ?= "v0.5.0"
+JOBSET_VERSION ?= "v0.11.1"
 LWS_VERSION ?= "v0.8.0"
 
 .PHONY: test-unit
