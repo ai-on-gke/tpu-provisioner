@@ -51,6 +51,11 @@ func (g *NodePoolGarbageCollector) Run(ctx context.Context) {
 				"createdForJobSetNamespace", np.CreatedForJobSet.Namespace,
 			)
 
+			if isStaticNodePool(np.Labels) {
+				log.Info("skipping garbage collection of static node pool")
+				continue
+			}
+
 			if !np.Error {
 				continue
 			}

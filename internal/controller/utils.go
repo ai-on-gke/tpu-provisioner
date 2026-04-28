@@ -1,10 +1,29 @@
 package controller
 
 import (
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
+
+const (
+	topologyAnnotation  = "cloud.google.com/gke-tpu-topology"
+	acceleratorSelector = "cloud.google.com/gke-tpu-accelerator"
+	// NOTE: Implementation of accelerator value appears to be in-transition
+	// across components.
+	tpu7xAccelerator  = "tpu7x"
+	tpuV7xAccelerator = "tpu-v7x"
+)
+
+// isStaticNodePool returns true if the nodepool has the static nodepool label, otherwise it returns false.
+func isStaticNodePool(labels map[string]string) bool {
+	if labels == nil {
+		return false
+	}
+	_, ok := labels[cloud.LabelTPUProvisionerStaticNodepool]
+	return ok
+}
 
 func isPending(p *corev1.Pod) bool {
 	return p.Status.Phase == corev1.PodPending
@@ -55,15 +74,27 @@ func partOfJobSet(pod *corev1.Pod) bool {
 	return pod.Annotations[jobset.JobSetNameKey] != ""
 }
 
+// jobSetForPod returns the JobSet Name that is 2 layers up from the Pod.
+func jobSetForPod(pod *corev1.Pod) string {
+	return pod.Annotations[jobset.JobSetNameKey]
+}
+
 // isLeaderPod returns true if the given pod is a leader pod (job completion index of 0),
 // otherwise it returns false.
 func isLeaderPod(pod *corev1.Pod) bool {
 	return pod.Annotations[batchv1.JobCompletionIndexAnnotation] == "0"
 }
 
-// autoProvisioningDisabled returns true if the pod has
-// "tpu-provisioner.cloud.google.com/disable-autoprovisioning=true"
-// set as a label or annotation. Otherwise, it returns false.
-func autoProvisioningDisabled(pod *corev1.Pod) bool {
-	return pod.Labels[DisableAutoProvisioningLabel] == "true" || pod.Annotations[DisableAutoProvisioningLabel] == "true"
+func acceleratorsForJobSet(js *jobset.JobSet) map[string]bool {
+	acc := map[string]bool{}
+
+	for _, rj := range js.Spec.ReplicatedJobs {
+		if sel := rj.Template.Spec.Template.Spec.NodeSelector; sel != nil {
+			if val, ok := sel[acceleratorSelector]; ok {
+				acc[val] = true
+			}
+		}
+	}
+
+	return acc
 }

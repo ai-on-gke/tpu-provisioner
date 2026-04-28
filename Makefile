@@ -4,7 +4,17 @@ IMG ?= controller:latest
 # Image URL to use all building/pushing image targets
 SA ?= tpu-provisioner@replace-with-your-project.iam.gserviceaccount.com
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.26.0
+ENVTEST_K8S_VERSION = 1.31.0
+
+# Workaround for golang/go#75031: auto-downloaded toolchains may be missing the covdata tool
+GOTOOLCHAIN ?= auto
+ifeq (auto,$(GOTOOLCHAIN))
+ifeq (,$(FORCE_HOST_GO))
+    export GOTOOLCHAIN=$(shell awk '/^toolchain go/ {print $$2}; /^go / {print "go"$$2}' go.mod | head -n1)
+else
+    export GOTOOLCHAIN=local
+endif
+endif
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -53,11 +63,20 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 JOBSET_VERSION ?= "v0.5.0"
+LWS_VERSION ?= "v0.8.0"
+
+.PHONY: test-unit
+test-unit: manifests fmt vet ## Run unit tests.
+	go test ./cmd/... ./internal/... -v -coverprofile cover-unit.out
+
+.PHONY: test-integration
+test-integration: manifests fmt vet envtest ## Run integration tests.
+	curl -L https://github.com/kubernetes-sigs/jobset/releases/download/$(JOBSET_VERSION)/manifests.yaml > test/crds/jobset-$(JOBSET_VERSION).yaml
+	curl -L https://github.com/kubernetes-sigs/lws/releases/download/$(LWS_VERSION)/manifests.yaml > test/crds/lws-$(LWS_VERSION).yaml
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./test/integration/... -v -coverprofile cover-integration.out
 
 .PHONY: test
-test: manifests fmt vet envtest ## Run tests.
-	curl -L https://github.com/kubernetes-sigs/jobset/releases/download/$(JOBSET_VERSION)/manifests.yaml > test/crds/jobset-$(JOBSET_VERSION).yaml
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -v -coverprofile cover.out
+test: test-unit test-integration ## Run all tests.
 
 ##@ Build
 
@@ -118,6 +137,7 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v4.5.7
 CONTROLLER_TOOLS_VERSION ?= v0.11.1
+ENVTEST_VERSION ?= release-0.19
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize
@@ -138,4 +158,20 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
-	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f "$(1)-$(3)" ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+rm -f $(1) || true ;\
+GOBIN=$(LOCALBIN) go install $${package} ;\
+mv $(1) $(1)-$(3) ;\
+} ;\
+ln -sf $(1)-$(3) $(1)
+endef

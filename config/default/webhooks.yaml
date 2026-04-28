@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-server
+  namespace: system
+spec:
+  selector:
+    control-plane: controller-manager
+  ports:
+  - port: 9443
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: jobs
+  annotations:
+    cert-manager.io/inject-ca-from: tpu-provisioner-system/tpu-provisioner-webhook-server
+webhooks:
+- name: webhook-server.tpu-provisioner-system.svc
+  matchPolicy: Equivalent
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  rules:
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: ["batch"]
+    apiVersions: ["v1"]
+    resources: ["jobs"]
+    scope: "Namespaced"
+  objectSelector:
+    matchExpressions:
+    # Only mutate Jobs managed by a JobSet
+    - key: jobset.sigs.k8s.io/job-key
+      operator: Exists
+    - key: tpu-provisioner.cloud.google.com/disable-autoprovisioning
+      operator: NotIn
+      values: ["true"]
+    - key: tpu-provisioner.cloud.google.com/inject-slice-selector
+      operator: In
+      values: ["true"]
+  failurePolicy: Fail
+  timeoutSeconds: 20
+  clientConfig:
+    #caBundle: # base64 CA bundle here
+    service:
+      namespace: system
+      name: webhook-server
+      path: /mutate
+      port: 9443
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: lws-statefulsets
+  annotations:
+    cert-manager.io/inject-ca-from: tpu-provisioner-system/tpu-provisioner-webhook-server
+webhooks:
+- name: lws-webhook-server.tpu-provisioner-system.svc
+  matchPolicy: Equivalent
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  rules:
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: ["apps"]
+    apiVersions: ["v1"]
+    resources: ["statefulsets"]
+    scope: "Namespaced"
+  objectSelector:
+    matchExpressions:
+    # Only mutate StatefulSets managed by a LeaderWorkerSet
+    - key: leaderworkerset.sigs.k8s.io/name
+      operator: Exists
+    # NOTE: LWS does not allow the user to specify statefulset labels:
+    #- key: tpu-provisioner.cloud.google.com/inject-slice-selector
+    #  operator: In
+    #  values: ["true"]
+  failurePolicy: Fail
+  timeoutSeconds: 20
+  clientConfig:
+    service:
+      namespace: system
+      name: webhook-server
+      path: /mutate-lws
+      port: 9443
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: webhook-server
+  namespace: system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: webhook-server
+  namespace: system
+spec:
+  secretName: webhook-server-tls
+  dnsNames:
+  - tpu-provisioner-webhook-server.tpu-provisioner-system.svc
+  issuerRef:
+    name: tpu-provisioner-webhook-server

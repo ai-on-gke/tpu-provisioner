@@ -24,8 +24,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"go.uber.org/zap/zapcore"
 
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -36,7 +36,10 @@ import (
 
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -44,24 +47,24 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg       *rest.Config
-	k8sClient client.Client
-	testEnv   *envtest.Environment
-	provider  = &mockProvider{
-		created: make(map[types.NamespacedName]bool),
-		deleted: make(map[string]time.Time),
-	}
-	ctx    context.Context
-	cancel context.CancelFunc
+	cfg                      *rest.Config
+	k8sClient                client.Client
+	testEnv                  *envtest.Environment
+	provider                 *mockProvider
+	staticNodepoolReconciler *controller.StaticNodepoolReconciler
+	ctx                      context.Context
+	cancel                   context.CancelFunc
 )
 
 const (
-	resourceName          = "test.com/tpu"
-	minNodeLifetime       = time.Second
-	nodepoolDeletionDelay = 5 * time.Second
-	timeout               = time.Second * 10
-	duration              = time.Second * 10
-	interval              = time.Millisecond * 250
+	resourceName                = "test.com/tpu"
+	minNodeLifetime             = time.Second
+	nodepoolDeletionDelay       = 5 * time.Second
+	staticNodepoolCreateTimeout = 10 * time.Second
+	timeout                     = time.Second * 10
+	duration                    = time.Second * 10
+	interval                    = time.Millisecond * 250
+	testNamespace               = "default"
 )
 
 func TestAPIs(t *testing.T) {
@@ -73,7 +76,7 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
-	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true), zap.Level(zapcore.DebugLevel)))
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
@@ -88,7 +91,16 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
+	gke := &cloud.GKE{}
+	provider = newMockProvider(gke)
+
 	err = jobset.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = v1beta1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = lws.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme
@@ -125,11 +137,47 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
+	err = controller.SetupSliceFieldIndexer(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
+	err = (&controller.JobSetSliceReconciler{
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		Recorder:                mgr.GetEventRecorderFor("slice-reconciler"),
+		RecreateConditions:      []controller.RecreateCondition{{Reason: "FailedToProvision"}, {Reason: "ProvisioningTimeout"}},
+		ConditionalRecreateWait: 0,
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
+	err = (&controller.LeaderWorkerSetSliceReconciler{
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		Recorder:                mgr.GetEventRecorderFor("lws-slice-reconciler"),
+		RecreateConditions:      []controller.RecreateCondition{{Reason: "FailedToProvision"}, {Reason: "ProvisioningTimeout"}},
+		ConditionalRecreateWait: 0,
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
+	staticNodepoolReconciler = &controller.StaticNodepoolReconciler{
+		Client:                      mgr.GetClient(),
+		Scheme:                      mgr.GetScheme(),
+		Recorder:                    mgr.GetEventRecorderFor("tpu-provisioner-static-nodepool-reconciler"),
+		Provider:                    provider,
+		StaticNodepoolCreateTimeout: staticNodepoolCreateTimeout,
+		Namespace:                   testNamespace,
+	}
+	err = staticNodepoolReconciler.SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
 	go func() {
 		defer GinkgoRecover()
-		err = mgr.Start(ctx)
-		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
+		if err := mgr.Start(ctx); err != nil {
+			logf.Log.Error(err, "failed to run manager")
+		}
 	}()
+
+	// Wait for cache to sync
+	mgr.GetCache().WaitForCacheSync(ctx)
 })
 
 var _ = AfterSuite(func() {
