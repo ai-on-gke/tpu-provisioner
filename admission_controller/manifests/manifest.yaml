@@ -68,14 +68,10 @@ spec:
         - containerPort: 5000
         env:
         # Set environment variables for your deployment.
-        - name: RESERVATION_LOCATION_HINT
+        - name: RESERVATION_LOCATION_HINT 
           value: "cell"
         - name: FORCE_ON_DEMAND
           value: "false"
-        - name: POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
         volumeMounts:
         - name: certs-volume
           readOnly: true

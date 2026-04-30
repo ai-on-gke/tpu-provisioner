@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -52,7 +51,7 @@ type NodeCriteria struct {
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=nodes/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups="",resources=nodes/finalizers,verbs=update
-//+kubebuilder:rbac:groups="jobset.x-k8s.io",resources=jobsets,verbs=get;update;list;watch
+//+kubebuilder:rbac:groups="jobset.x-k8s.io",resources=jobsets,verbs=get;list;watch
 
 func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	lg := ctrllog.FromContext(ctx)
@@ -99,11 +98,6 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	if isStaticNodePool(node.GetLabels()) {
-		// lg.Info("Skipping deletion of static node pool", "nodePoolName", nodePoolName)
-		return ctrl.Result{}, nil
-	}
-
 	// Ensure the JobSet whose pods created this node pool is either gone, completed, or failed before
 	// deleting the node pool.
 	jobSetName, exists := node.Labels[cloud.LabelJobSetName]
@@ -130,10 +124,6 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Case 2: if JobSet is in completed or failed state, delete node pool.
 	if jobSetCompleted(&js) || jobSetFailed(&js) {
 		return r.deleteNodePool(ctx, &node, fmt.Sprintf("JobSet %s execution has ended (completed or failed)", jobSetName))
-	}
-	if utils.SliceProvisioningEnabled(&js) {
-		lg.Info("ignoring nodepool autoprovisioning since slice provisioning is enabled", "label", utils.SliceProvisioningLabel)
-		return ctrl.Result{}, nil
 	}
 
 	// No need to check all the other nodes, which will have the same jobset name label, we can end

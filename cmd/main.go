@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/cmd/config"
+	"github.com/kelseyhightower/envconfig"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -38,17 +38,14 @@ import (
 	"cloud.google.com/go/compute/metadata"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
-	jobwebhook "github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/webhook"
 
 	containerv1beta1 "google.golang.org/api/container/v1beta1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,35 +53,58 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
-	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	//+kubebuilder:scaffold:imports
 )
 
 var (
-	scheme                = runtime.NewScheme()
-	setupLog              = ctrl.Log.WithName("setup")
-	enableSliceController = os.Getenv("ENABLE_SLICE_CONTROLLER") == "true"
-	enableWebhooks        = os.Getenv("ENABLE_WEBHOOKS") == "true"
+	scheme   = runtime.NewScheme()
+	setupLog = ctrl.Log.WithName("setup")
 )
 
 func init() {
-	if enableSliceController {
-		utilruntime.Must(v1beta1.AddToScheme(scheme))
-	}
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme))
-	utilruntime.Must(lws.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
 func main() {
-	cfg, err := config.ParseEnv()
-	if err != nil {
-		setupLog.Error(err, "unable to parse environment variables")
-		os.Exit(1)
+	var cfg struct {
+		// Provider can be "gke" or "mock".
+		Provider string `envconfig:"PROVIDER" default:"gke"`
+
+		GCPProjectID          string `envconfig:"GCP_PROJECT_ID"`
+		GCPClusterLocation    string `envconfig:"GCP_CLUSTER_LOCATION"`
+		GCPZone               string `envconfig:"GCP_ZONE"`
+		GCPCluster            string `envconfig:"GCP_CLUSTER"`
+		GCPNodeServiceAccount string `envconfig:"GCP_NODE_SERVICE_ACCOUNT"`
+
+		GCPNodeTags               []string `envconfig:"GCP_NODE_TAGS"`
+		GCPPodToNodeLabels        []string `envconfig:"GCP_POD_TO_NODE_LABELS"`
+		GCPNodeSecondaryDisk      string   `envconfig:"GCP_NODE_SECONDARY_DISK" default:""`
+		GCPNodeSecureBoot         bool     `envconfig:"GCP_NODE_SECURE_BOOT" default:"true"`
+		GCPNodeAdditionalNetworks string   `envconfig:"GCP_NODE_ADDITIONAL_NETWORKS" default:""`
+
+		GCPNodeDiskType            string `envconfig:"GCP_NODE_DISK_TYPE"`
+		GCPNodeConfidentialStorage bool   `envconfig:"GCP_NODE_CONFIDENTIAL_STORAGE"`
+		GCPNodeBootDiskKMSKey      string `envconfig:"GCP_NODE_BOOT_DISK_KMS_KEY"`
+
+		// GCPForceOnDemand forces the controller to create nodes on demand, even if
+		// the Pod requests a reservation or spot.
+		GCPForceOnDemand bool `envconfig:"GCP_FORCE_ON_DEMAND" default:"false"`
+
+		// NodeMinLifespan is the amount of time that should pass between a Node object
+		// creation and a cleanup of that Node. This is mostly irrelevant now that JobSet
+		// existance is checked before deleting a NodePool.
+		NodeMinLifespan time.Duration `envconfig:"NODE_MIN_LIFESPAN" default:"10s"`
+
+		NodepoolDeletionDelay time.Duration `envconfig:"NODEPOOL_DELETION_DELAY" default:"30s"`
+
+		PodResourceType string `envconfig:"POD_RESOURCE_TYPE" default:"google.com/tpu"`
+
+		Concurrency int `envconfig:"CONCURRENCY" default:"3"`
 	}
+	envconfig.MustProcess("", &cfg)
 
 	var metricsAddr string
 	var enableLeaderElection bool
@@ -102,25 +122,15 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	if cfg.PodNamespace == "" {
-		cfg.PodNamespace = "default"
-	}
-
-	var webhookServer webhook.Server
-	if enableWebhooks {
-		webhookServer = webhook.NewServer(
-			webhook.Options{
-				Port:    9443,
-				CertDir: "/certs",
-			},
-		)
-	}
-
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Metrics: server.Options{
 			BindAddress: metricsAddr,
 		},
-		WebhookServer:          webhookServer,
+		WebhookServer: webhook.NewServer(
+			webhook.Options{
+				Port: 9443,
+			},
+		),
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
@@ -132,13 +142,6 @@ func main() {
 					// are managed by this controller.
 					Label: labels.SelectorFromSet(labels.Set{cloud.LabelNodepoolManager: cloud.LabelNodepoolManagerTPUPodinator}),
 				},
-				// Filter based on ConfigMap name.
-				&corev1.ConfigMap{}: {
-					Field: fields.SelectorFromSet(fields.Set{"metadata.name": controller.ConfigMapName}),
-					Namespaces: map[string]cache.Config{
-						cfg.PodNamespace: {},
-					},
-				},
 			},
 		},
 	})
@@ -146,7 +149,6 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
-	ctx := ctrl.SetupSignalHandler()
 
 	var provider cloud.Provider
 	switch p := strings.ToLower(cfg.Provider); p {
@@ -194,7 +196,6 @@ func main() {
 			"nodeServiceAccount", cfg.GCPNodeServiceAccount,
 			"nodeTags", cfg.GCPNodeTags,
 			"podToNodeLabels", cfg.GCPPodToNodeLabels,
-			"maxPodsPerNode", cfg.GKEMaxPodsPerNode,
 		)
 
 		clusterCtx := cloud.GKEContext{
@@ -212,7 +213,6 @@ func main() {
 			PodToNodeLabels:         cfg.GCPPodToNodeLabels,
 			NodeSecureBoot:          cfg.GCPNodeSecureBoot,
 			ForceOnDemand:           cfg.GCPForceOnDemand,
-			MaxPodsPerNode:          cfg.GKEMaxPodsPerNode,
 		}
 
 		containers, err := containerv1beta1.NewService(context.Background() /*, option.WithCredentials(creds)*/)
@@ -225,46 +225,16 @@ func main() {
 			Service:        containers,
 		}
 
-		gkeProvider := &cloud.GKE{
+		provider = &cloud.GKE{
 			NodePools:      nodePoolsService,
 			ClusterContext: clusterCtx,
 			Recorder:       mgr.GetEventRecorderFor("tpu-provisioner"),
 		}
-		provider = gkeProvider
 	case "mock":
 		provider = &cloud.Mock{}
 	default:
 		setupLog.Error(err, "unrecognized provider", "provider", p)
 		os.Exit(1)
-	}
-
-	if enableSliceController {
-		if err := controller.SetupSliceFieldIndexer(mgr); err != nil {
-			setupLog.Error(err, "unable to setup slice field indexer")
-			os.Exit(1)
-		}
-		recreateConditions := controller.ParseRecreateConditions(cfg.SliceRecreateConditions)
-		if err := (&controller.JobSetSliceReconciler{
-			Client:                  mgr.GetClient(),
-			Scheme:                  mgr.GetScheme(),
-			Recorder:                mgr.GetEventRecorderFor("tpu-provisioner"),
-			RecreateConditions:      recreateConditions,
-			ConditionalRecreateWait: cfg.SliceConditionalRecreateWait,
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "SliceReconciler")
-			os.Exit(1)
-		}
-
-		if err := (&controller.LeaderWorkerSetSliceReconciler{
-			Client:                  mgr.GetClient(),
-			Scheme:                  mgr.GetScheme(),
-			Recorder:                mgr.GetEventRecorderFor("tpu-provisioner"),
-			RecreateConditions:      recreateConditions,
-			ConditionalRecreateWait: cfg.SliceConditionalRecreateWait,
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "LeaderWorkerSetSliceReconciler")
-			os.Exit(1)
-		}
 	}
 
 	if err := (&controller.CreationReconciler{
@@ -295,41 +265,6 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "DeletionReconciler")
 		os.Exit(1)
 	}
-
-	if err := (&controller.StaticNodepoolReconciler{
-		Client:                          mgr.GetClient(),
-		Scheme:                          mgr.GetScheme(),
-		Recorder:                        mgr.GetEventRecorderFor("tpu-provisioner"),
-		Provider:                        provider,
-		StaticNodepoolCreateConcurrency: cfg.StaticNodepoolCreateConcurrency,
-		StaticNodepoolDeleteConcurrency: cfg.StaticNodepoolDeleteConcurrency,
-		StaticNodepoolCreateTimeout:     cfg.StaticNodepoolCreateTimeout,
-		Namespace:                       cfg.PodNamespace,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "StaticNodepoolReconciler")
-		os.Exit(1)
-	}
-
-	if enableWebhooks {
-		// Register webhook handlers
-		jobWebhook := &jobwebhook.LoggingHandler{
-			Name: "job",
-			Handler: &jobwebhook.JobMutationHandler{
-				Decoder: admission.NewDecoder(scheme),
-			},
-		}
-		mgr.GetWebhookServer().Register("/mutate", &webhook.Admission{Handler: jobWebhook})
-
-		lwsWebhook := &jobwebhook.LoggingHandler{
-			Name: "lws",
-			Handler: &jobwebhook.LWSStatefulSetMutationHandler{
-				Client:  mgr.GetClient(),
-				Decoder: admission.NewDecoder(scheme),
-			},
-		}
-		mgr.GetWebhookServer().Register("/mutate-lws", &webhook.Admission{Handler: lwsWebhook})
-	}
-
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -340,6 +275,7 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
+	ctx := ctrl.SetupSignalHandler()
 
 	gc := &controller.NodePoolGarbageCollector{
 		Interval: time.Minute,

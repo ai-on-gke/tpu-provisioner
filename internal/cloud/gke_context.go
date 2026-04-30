@@ -19,7 +19,6 @@ type GKEContext struct {
 	PodToNodeLabels []string
 	NodeSecureBoot  bool
 	ForceOnDemand   bool
-	MaxPodsPerNode  int
 }
 
 func (c GKEContext) ClusterName() string {
