@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -14,6 +13,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/controller"
 )
 
 // +kubebuilder:docs-gen:collapse=Imports
@@ -44,11 +45,6 @@ var _ = Describe("Creation controller", func() {
 			defer func() {
 				Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
 			}()
-
-			// Create JobSet for Pod.
-			testJS := makeJobSet("test-js")
-			testJS.Namespace = ns.Name
-			Expect(k8sClient.Create(ctx, testJS)).To(Succeed())
 
 			// Create pod in test namespace.
 			pod := tc.pod
@@ -106,7 +102,7 @@ func makeFollowerPod() *corev1.Pod {
 
 func makeLeaderPodAutoProvisioningDisabled() *corev1.Pod {
 	leaderPod := makeLeaderPod()
-	leaderPod.Annotations[utils.DisableAutoProvisioningLabel] = "true"
+	leaderPod.Annotations[controller.DisableAutoProvisioningLabel] = "true"
 	return leaderPod
 }
 
