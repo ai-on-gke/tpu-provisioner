@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: webhook-server
+  name: tpu-provisioner-webhook-server
   namespace: system
 spec:
   selector:
@@ -12,7 +12,7 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: jobs
+  name: tpu-provisioner-jobs
   annotations:
     cert-manager.io/inject-ca-from: tpu-provisioner-system/tpu-provisioner-webhook-server
 webhooks:
@@ -43,14 +43,14 @@ webhooks:
     #caBundle: # base64 CA bundle here
     service:
       namespace: system
-      name: webhook-server
+      name: tpu-provisioner-webhook-server
       path: /mutate
       port: 9443
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: lws-statefulsets
+  name: tpu-provisioner-lws-statefulsets
   annotations:
     cert-manager.io/inject-ca-from: tpu-provisioner-system/tpu-provisioner-webhook-server
 webhooks:
@@ -78,14 +78,14 @@ webhooks:
   clientConfig:
     service:
       namespace: system
-      name: webhook-server
+      name: tpu-provisioner-webhook-server
       path: /mutate-lws
       port: 9443
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: webhook-server
+  name: tpu-provisioner-webhook-server
   namespace: system
 spec:
   selfSigned: {}
@@ -93,7 +93,7 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: webhook-server
+  name: tpu-provisioner-webhook-server
   namespace: system
 spec:
   secretName: webhook-server-tls
