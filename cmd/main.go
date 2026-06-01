@@ -296,20 +296,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.StaticNodepoolReconciler{
-		Client:                          mgr.GetClient(),
-		Scheme:                          mgr.GetScheme(),
-		Recorder:                        mgr.GetEventRecorderFor("tpu-provisioner"),
-		Provider:                        provider,
-		StaticNodepoolCreateConcurrency: cfg.StaticNodepoolCreateConcurrency,
-		StaticNodepoolDeleteConcurrency: cfg.StaticNodepoolDeleteConcurrency,
-		StaticNodepoolCreateTimeout:     cfg.StaticNodepoolCreateTimeout,
-		Namespace:                       cfg.PodNamespace,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "StaticNodepoolReconciler")
-		os.Exit(1)
+	if enableSliceController {
+		if err := (&controller.StaticNodepoolReconciler{
+			Client:                          mgr.GetClient(),
+			Scheme:                          mgr.GetScheme(),
+			Recorder:                        mgr.GetEventRecorderFor("tpu-provisioner"),
+			Provider:                        provider,
+			StaticNodepoolCreateConcurrency: cfg.StaticNodepoolCreateConcurrency,
+			StaticNodepoolDeleteConcurrency: cfg.StaticNodepoolDeleteConcurrency,
+			StaticNodepoolCreateTimeout:     cfg.StaticNodepoolCreateTimeout,
+			Namespace:                       cfg.PodNamespace,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "StaticNodepoolReconciler")
+			os.Exit(1)
+		}
 	}
-
 	if enableWebhooks {
 		// Register webhook handlers
 		jobWebhook := &jobwebhook.LoggingHandler{
