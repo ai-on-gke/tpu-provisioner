@@ -108,5 +108,19 @@ spec:
             requests:
               cpu: 1
               memory: 1Gi
+        - name: collector
+          image: otel/opentelemetry-collector-contrib:0.116.1
+          args:
+            - --config
+            - /etc/otelcol-contrib/config.yaml
+            - --feature-gates=exporter.googlemanagedprometheus.intToDouble
+          volumeMounts:
+            - name: collector-config
+              mountPath: /etc/otelcol-contrib/
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
+      volumes:
+        - name: collector-config
+          configMap:
+            name: collector-config
+
