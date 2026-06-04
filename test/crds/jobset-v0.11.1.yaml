@@ -10653,7 +10653,7 @@ spec:
         - --zap-log-level=2
         command:
         - /manager
-        image: us-central1-docker.pkg.dev/k8s-staging-images/jobset/jobset:v0.11.1
+        image: registry.k8s.io/jobset/jobset:v0.11.1
         livenessProbe:
           httpGet:
             path: /healthz
