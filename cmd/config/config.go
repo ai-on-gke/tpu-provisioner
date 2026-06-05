@@ -60,6 +60,9 @@ type Config struct {
 
 	Concurrency int `envconfig:"CONCURRENCY" default:"3"`
 
+	BackoffBaseDelay time.Duration `envconfig:"BACKOFF_BASE_DELAY" default:"5s"`
+	BackoffMaxDelay  time.Duration `envconfig:"BACKOFF_MAX_DELAY" default:"5m"`
+
 	StaticNodepoolCreateConcurrency int           `envconfig:"STATIC_NODEPOOL_CREATE_CONCURRENCY" default:"3"`
 	StaticNodepoolCreateTimeout     time.Duration `envconfig:"STATIC_NODEPOOL_CREATE_TIMEOUT" default:"10m"`
 	StaticNodepoolDeleteConcurrency int           `envconfig:"STATIC_NODEPOOL_DELETE_CONCURRENCY" default:"3"`

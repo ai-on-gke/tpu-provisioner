@@ -48,6 +48,9 @@ type CreationReconciler struct {
 	PodCriteria PodCriteria
 	Provider    cloud.Provider
 	Concurrency int
+
+	BackoffBaseDelay time.Duration
+	BackoffMaxDelay  time.Duration
 }
 
 type PodCriteria struct {
@@ -107,7 +110,6 @@ func (r *CreationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, err
 		}
 	}
-
 	return ctrl.Result{}, nil
 }
 
@@ -117,6 +119,7 @@ func (r *CreationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&corev1.Pod{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: r.Concurrency,
+			RateLimiter:             defaultRateLimiter(r.BackoffBaseDelay, r.BackoffMaxDelay),
 		}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
 			// Only reconcile pods which meet the conditions defined below.

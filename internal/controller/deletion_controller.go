@@ -36,6 +36,9 @@ type DeletionReconciler struct {
 
 	NodeCriteria NodeCriteria
 	Concurrency  int
+
+	BackoffBaseDelay time.Duration
+	BackoffMaxDelay  time.Duration
 }
 
 type NodeCriteria struct {
@@ -162,6 +165,7 @@ func (r *DeletionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(handler.MapFunc(nodeForPod))).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: r.Concurrency,
+			RateLimiter:             defaultRateLimiter(r.BackoffBaseDelay, r.BackoffMaxDelay),
 		}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
 			node, ok := object.(*corev1.Node)
@@ -177,6 +181,7 @@ func (r *DeletionReconciler) deleteNodePool(ctx context.Context, node *corev1.No
 			lg.V(3).Info("Ignoring duplicate request to delete node pool")
 			return ctrl.Result{}, nil
 		}
+		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }

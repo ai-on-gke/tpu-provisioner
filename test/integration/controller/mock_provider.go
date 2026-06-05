@@ -21,6 +21,8 @@ type mockProvider struct {
 	staticNodepoolsCreated map[string]cloud.NodePoolRef
 	ensureCalls            int
 	deleteCalls            int
+	EnsureError            error
+	DeleteError            error
 }
 
 func newMockProvider(gke *cloud.GKE) *mockProvider {
@@ -58,8 +60,9 @@ func (p *mockProvider) ProjectID() string { return "test-project" }
 func (p *mockProvider) EnsureNodePoolForPod(pod *corev1.Pod, _ string) error {
 	p.Lock()
 	defer p.Unlock()
+	p.ensureCalls++
 	p.created[types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}] = true
-	return nil
+	return p.EnsureError
 }
 
 func (p *mockProvider) DiffStaticNodePools(existingNodepools []cloud.NodePoolRef, desiredNodepools []*cloud.DesiredStaticNodePool) ([]*cloud.DesiredStaticNodePool, []string, []string, []string, error) {
@@ -128,6 +131,10 @@ func (p *mockProvider) ListNodePools() ([]cloud.NodePoolRef, error) {
 func (p *mockProvider) DeleteNodePool(name string, eventObj client.Object, why string) error {
 	p.Lock()
 	defer p.Unlock()
+	p.deleteCalls++
+	if p.DeleteError != nil {
+		return p.DeleteError
+	}
 	if _, exists := p.deleted[name]; !exists {
 		p.deleted[name] = time.Now()
 	}

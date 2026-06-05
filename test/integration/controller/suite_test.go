@@ -122,6 +122,8 @@ var _ = BeforeSuite(func() {
 		PodCriteria: controller.PodCriteria{
 			ResourceType: resourceName,
 		},
+		BackoffBaseDelay: 5 * time.Second,
+		BackoffMaxDelay:  5 * time.Minute,
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
@@ -134,6 +136,8 @@ var _ = BeforeSuite(func() {
 			MinLifetime:       minNodeLifetime,
 			PoolDeletionDelay: nodepoolDeletionDelay,
 		},
+		BackoffBaseDelay: 5 * time.Second,
+		BackoffMaxDelay:  5 * time.Minute,
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
