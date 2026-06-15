@@ -1,8 +1,12 @@
+namespace: tpu-provisioner-system
+
 resources:
   - ../default
+  - ./webhooks.yaml
 
 patchesStrategicMerge:
   - config_patch.yaml
+  - manager_webhook_patch.yaml
 
 patchesJson6902:
 - target:
