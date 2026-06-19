@@ -49,6 +49,9 @@ type Config struct {
 	// GKEMaxPodsPerNode sets the max pods per node in provisioned node pools
 	GKEMaxPodsPerNode int `envconfig:"GKE_MAX_PODS_PER_NODE" default:"16"`
 
+	// EnableImageStreaming enables image streaming on GKE node pools
+	EnableImageStreaming bool `envconfig:"ENABLE_IMAGE_STREAMING" default:"false"`
+
 	// NodeMinLifespan is the amount of time that should pass between a Node object
 	// creation and a cleanup of that Node. This is mostly irrelevant now that JobSet
 	// existance is checked before deleting a NodePool.

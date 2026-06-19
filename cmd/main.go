@@ -195,6 +195,7 @@ func main() {
 			"nodeTags", cfg.GCPNodeTags,
 			"podToNodeLabels", cfg.GCPPodToNodeLabels,
 			"maxPodsPerNode", cfg.GKEMaxPodsPerNode,
+			"enableImageStreaming", cfg.EnableImageStreaming,
 		)
 
 		clusterCtx := cloud.GKEContext{
@@ -213,6 +214,7 @@ func main() {
 			NodeSecureBoot:          cfg.GCPNodeSecureBoot,
 			ForceOnDemand:           cfg.GCPForceOnDemand,
 			MaxPodsPerNode:          cfg.GKEMaxPodsPerNode,
+			EnableImageStreaming:    cfg.EnableImageStreaming,
 		}
 
 		containers, err := containerv1beta1.NewService(context.Background() /*, option.WithCredentials(creds)*/)

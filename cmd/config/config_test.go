@@ -37,6 +37,7 @@ func TestParseEnv(t *testing.T) {
 				Provider:                        "gke",
 				GCPNodeSecureBoot:               true,
 				GKEMaxPodsPerNode:               16,
+				EnableImageStreaming:            false,
 				NodeMinLifespan:                 10 * time.Second,
 				NodepoolDeletionDelay:           30 * time.Second,
 				PodResourceType:                 "google.com/tpu",
@@ -62,6 +63,7 @@ func TestParseEnv(t *testing.T) {
 				"GKE_MAX_PODS_PER_NODE":          "18",
 				"BACKOFF_BASE_DELAY":             "10s",
 				"BACKOFF_MAX_DELAY":              "10m",
+				"ENABLE_IMAGE_STREAMING":         "true",
 			},
 			want: Config{
 				Provider:                        "mock",
@@ -70,6 +72,7 @@ func TestParseEnv(t *testing.T) {
 				SliceRecreateConditions:         []string{"Reason1", "Reason2:'substring'"},
 				GCPNodeSecureBoot:               true,
 				GKEMaxPodsPerNode:               18,
+				EnableImageStreaming:            true,
 				NodeMinLifespan:                 5 * time.Second,
 				NodepoolDeletionDelay:           30 * time.Second,
 				PodResourceType:                 "google.com/tpu",

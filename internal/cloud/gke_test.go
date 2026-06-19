@@ -162,6 +162,7 @@ func newTestGKE(t *testing.T) (*GKE, *mockGKEService) {
 		PodToNodeLabels:        nil,
 		NodeSecureBoot:         true,
 		ForceOnDemand:          false,
+		EnableImageStreaming:   false,
 	}
 	rec := &mockEventRecorder{}
 	gke := &GKE{
@@ -628,6 +629,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -659,6 +663,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5lp-hightpu-1t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  1,
 				Locations:         []string{""},
@@ -690,6 +697,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct6e-standard-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  1,
 				Locations:         []string{""},
@@ -721,6 +731,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct6e-standard-16t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  4,
 				Locations:         []string{""},
@@ -753,7 +766,10 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
-					Spot:                   true,
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
+					Spot: true,
 					Taints: []*container.NodeTaint{
 						{Effect: "NO_SCHEDULE", Key: "cloud.google.com/gke-spot", Value: "true"},
 					},
@@ -787,7 +803,10 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
-					Spot:                   false,
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
+					Spot: false,
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -820,6 +839,9 @@ func TestNodePoolForPod(t *testing.T) {
 						Values:                 []string{"tpu-rsv"},
 					},
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -855,6 +877,9 @@ func TestNodePoolForPod(t *testing.T) {
 						Values:                 []string{"projects/tpu-rsv-project/reservations/tpu-rsv"},
 					},
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -884,6 +909,9 @@ func TestNodePoolForPod(t *testing.T) {
 					MachineType:            "ct5p-hightpu-4t",
 					ReservationAffinity:    nil,
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -912,6 +940,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				}, InitialNodeCount: 512,
 				Locations:         []string{""},
 				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
@@ -923,7 +954,7 @@ func TestNodePoolForPod(t *testing.T) {
 		},
 		{
 			desc:       "pod with secondary boot disk",
-			gkeContext: GKEContext{NodeSecondaryDisk: "projects/my-gcp-project/global/images/my-disk-image"},
+			gkeContext: GKEContext{NodeSecondaryDisk: "projects/my-gcp-project/global/images/my-disk-image", EnableImageStreaming: true},
 			want: &container.NodePool{
 				Config: &container.NodeConfig{
 					Labels: map[string]string{
@@ -936,12 +967,44 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: true,
+					},
 					SecondaryBootDisks: []*container.SecondaryBootDisk{
 						{
 							DiskImage: "projects/my-gcp-project/global/images/my-disk-image",
 							Mode:      "CONTAINER_IMAGE_CACHE",
 						},
 					},
+				},
+				InitialNodeCount:  512,
+				Locations:         []string{""},
+				Management:        &container.NodeManagement{AutoRepair: true, AutoUpgrade: false},
+				MaxPodsConstraint: &container.MaxPodsConstraint{MaxPodsPerNode: 16},
+				Name:              "jobset-test-rando",
+				PlacementPolicy:   &container.PlacementPolicy{TpuTopology: "8x16x16", Type: "COMPACT"},
+				UpgradeSettings:   &container.UpgradeSettings{MaxSurge: 1},
+			},
+		},
+		{
+			desc:       "pod with secondary boot disk and image streaming disabled",
+			gkeContext: GKEContext{NodeSecondaryDisk: "projects/my-gcp-project/global/images/my-disk-image", EnableImageStreaming: false},
+			want: &container.NodePool{
+				Config: &container.NodeConfig{
+					Labels: map[string]string{
+						"google.com/nodepool-manager":                 "tpu-provisioner",
+						"google.com/tpu-provisioner-jobset-name":      "jobset-test",
+						"google.com/tpu-provisioner-jobset-namespace": "default",
+						"google.com/tpu-provisioner-parent-kind":      "job",
+						"google.com/tpu-provisioner-parent-name":      "jobset-test-job-1-0",
+						"google.com/tpu-provisioner-parent-namespace": "default",
+					},
+					MachineType:            "ct5p-hightpu-4t",
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
+					SecondaryBootDisks: nil,
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -970,6 +1033,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1004,6 +1070,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1038,6 +1107,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1065,6 +1137,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1109,6 +1184,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1148,8 +1226,11 @@ func TestNodePoolForPod(t *testing.T) {
 						"google.com/tpu-provisioner-parent-name":      "jobset-test-job-1-0",
 						"google.com/tpu-provisioner-parent-namespace": "default",
 					},
-					MachineType:               "ct5p-hightpu-4t",
-					ShieldedInstanceConfig:    &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					MachineType:            "ct5p-hightpu-4t",
+					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 					EnableConfidentialStorage: true,
 					BootDiskKmsKey:            "my-kms-key",
 					DiskType:                  "hyperdisk-balanced",
@@ -1187,6 +1268,9 @@ func TestNodePoolForPod(t *testing.T) {
 					},
 					MachineType:            "ct5p-hightpu-4t",
 					ShieldedInstanceConfig: &container.ShieldedInstanceConfig{EnableIntegrityMonitoring: true},
+					GcfsConfig: &container.GcfsConfig{
+						Enabled: false,
+					},
 				},
 				InitialNodeCount:  512,
 				Locations:         []string{""},
@@ -1835,4 +1919,49 @@ func TestDiffStaticNodePools(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStaticImageStreamingConfig(t *testing.T) {
+	staticConfig := &StaticNodePoolConfig{
+		MachineType: "ct5p-hightpu-4t",
+		NodeCount:   4,
+	}
+
+	t.Run("static nodepool with EnableImageStreaming true", func(t *testing.T) {
+		gke := &GKE{
+			ClusterContext: GKEContext{
+				EnableImageStreaming: true,
+				NodeSecondaryDisk:    "test-disk",
+			},
+		}
+		np, err := gke.StaticNodePoolForSubBlock("test-pool", "subblock-1", staticConfig)
+		if err != nil {
+			t.Fatalf("StaticNodePoolForSubBlock() error = %v", err)
+		}
+		if np.Config.GcfsConfig == nil || !np.Config.GcfsConfig.Enabled {
+			t.Errorf("expected GcfsConfig.Enabled to be true, got = %v", np.Config.GcfsConfig)
+		}
+		if len(np.Config.SecondaryBootDisks) != 1 {
+			t.Errorf("expected 1 secondary boot disk, got = %v", len(np.Config.SecondaryBootDisks))
+		}
+	})
+
+	t.Run("static nodepool with EnableImageStreaming false", func(t *testing.T) {
+		gke := &GKE{
+			ClusterContext: GKEContext{
+				EnableImageStreaming: false,
+				NodeSecondaryDisk:    "test-disk",
+			},
+		}
+		np, err := gke.StaticNodePoolForSubBlock("test-pool", "subblock-1", staticConfig)
+		if err != nil {
+			t.Fatalf("StaticNodePoolForSubBlock() error = %v", err)
+		}
+		if np.Config.GcfsConfig == nil || np.Config.GcfsConfig.Enabled {
+			t.Errorf("expected GcfsConfig.Enabled to be false, got = %v", np.Config.GcfsConfig)
+		}
+		if len(np.Config.SecondaryBootDisks) != 0 {
+			t.Errorf("expected 0 secondary boot disks, got = %v", len(np.Config.SecondaryBootDisks))
+		}
+	})
 }

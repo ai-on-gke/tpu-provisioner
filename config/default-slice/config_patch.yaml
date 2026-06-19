@@ -6,3 +6,4 @@ metadata:
 data:
   ENABLE_SLICE_CONTROLLER: "true"
   ENABLE_WEBHOOKS: "true"
+  ENABLE_IMAGE_STREAMING: "false"

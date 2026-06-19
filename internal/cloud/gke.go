@@ -445,12 +445,16 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 
 	var secondaryDisks []*containerv1beta1.SecondaryBootDisk
 	if g.ClusterContext.NodeSecondaryDisk != "" {
-		secondaryDisks = []*containerv1beta1.SecondaryBootDisk{
-			{
-				// Example: "projects/my-gcp-project/global/images/my-disk-image"
-				DiskImage: g.ClusterContext.NodeSecondaryDisk,
-				Mode:      "CONTAINER_IMAGE_CACHE",
-			},
+		if g.ClusterContext.EnableImageStreaming {
+			secondaryDisks = []*containerv1beta1.SecondaryBootDisk{
+				{
+					// Example: "projects/my-gcp-project/global/images/my-disk-image"
+					DiskImage: g.ClusterContext.NodeSecondaryDisk,
+					Mode:      "CONTAINER_IMAGE_CACHE",
+				},
+			}
+		} else {
+			log.Info("WARNING: Ignoring secondary disk. ENABLE_IMAGE_STREAMING must be enabled.", "secondaryDisk", g.ClusterContext.NodeSecondaryDisk)
 		}
 	}
 
@@ -512,6 +516,7 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 			// NOTE: vendor/ was manually updated to include the field because
 			// it was not currently available at the time of writing:
 			SecondaryBootDisks:        secondaryDisks,
+			GcfsConfig:                g.buildGcfsConfig(g.ClusterContext.EnableImageStreaming),
 			MachineType:               machineType,
 			ReservationAffinity:       reservation,
 			Labels:                    labels,
@@ -878,11 +883,15 @@ func (g *GKE) StaticNodePoolForSubBlock(nodePoolID, subblockToConsume string, co
 
 	var secondaryDisks []*containerv1beta1.SecondaryBootDisk
 	if g.ClusterContext.NodeSecondaryDisk != "" {
-		secondaryDisks = []*containerv1beta1.SecondaryBootDisk{
-			{
-				DiskImage: g.ClusterContext.NodeSecondaryDisk,
-				Mode:      "CONTAINER_IMAGE_CACHE",
-			},
+		if g.ClusterContext.EnableImageStreaming {
+			secondaryDisks = []*containerv1beta1.SecondaryBootDisk{
+				{
+					DiskImage: g.ClusterContext.NodeSecondaryDisk,
+					Mode:      "CONTAINER_IMAGE_CACHE",
+				},
+			}
+		} else {
+			log.Info("WARNING: Ignoring secondary disk on static nodepool. ENABLE_IMAGE_STREAMING must be enabled.", "nodePoolName", nodePoolID, "secondaryDisk", g.ClusterContext.NodeSecondaryDisk)
 		}
 	}
 
@@ -952,6 +961,7 @@ func (g *GKE) StaticNodePoolForSubBlock(nodePoolID, subblockToConsume string, co
 			},
 			Tags:                      tags,
 			SecondaryBootDisks:        secondaryDisks,
+			GcfsConfig:                g.buildGcfsConfig(g.ClusterContext.EnableImageStreaming),
 			MachineType:               config.MachineType,
 			ReservationAffinity:       reservation,
 			Labels:                    labels,
@@ -979,6 +989,12 @@ func (g *GKE) StaticNodePoolForSubBlock(nodePoolID, subblockToConsume string, co
 	}
 	np.Config.Labels[LabelNodePoolHash] = hash
 	return np, nil
+}
+
+func (g *GKE) buildGcfsConfig(enabled bool) *containerv1beta1.GcfsConfig {
+	return &containerv1beta1.GcfsConfig{
+		Enabled: enabled,
+	}
 }
 
 // NodePoolHash attempts to hash information specific to workload requirements.
