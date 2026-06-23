@@ -74,10 +74,11 @@ func (r *LeaderWorkerSetSliceReconciler) Reconcile(ctx context.Context, req ctrl
 		}
 
 		if controllerutil.ContainsFinalizer(&lwset, SliceCleanupFinalizer) {
-			log.Info("Removing finalizer from LeaderWorkerSet", "finalizer", SliceCleanupFinalizer)
+			log.Info("Patching LeaderWorkerSet to remove finalizer", "finalizer", SliceCleanupFinalizer)
+			patch := client.MergeFrom(lwset.DeepCopy())
 			controllerutil.RemoveFinalizer(&lwset, SliceCleanupFinalizer)
-			if err := r.Update(ctx, &lwset); err != nil {
-				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+			if err := r.Patch(ctx, &lwset, patch); err != nil {
+				return ctrl.Result{}, fmt.Errorf("patching leaderworkerset to remove finalizer: %w", err)
 			}
 		}
 		return ctrl.Result{}, nil
@@ -92,10 +93,11 @@ func (r *LeaderWorkerSetSliceReconciler) Reconcile(ctx context.Context, req ctrl
 
 	// Add finalizer if not present
 	if !controllerutil.ContainsFinalizer(&lwset, SliceCleanupFinalizer) {
-		log.Info("Adding finalizer to LeaderWorkerSet", "finalizer", SliceCleanupFinalizer)
+		log.Info("Patching LeaderWorkerSet to add finalizer", "finalizer", SliceCleanupFinalizer)
+		patch := client.MergeFrom(lwset.DeepCopy())
 		controllerutil.AddFinalizer(&lwset, SliceCleanupFinalizer)
-		if err := r.Update(ctx, &lwset); err != nil {
-			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
+		if err := r.Patch(ctx, &lwset, patch); err != nil {
+			return ctrl.Result{}, fmt.Errorf("patching leaderworkerset to add finalizer: %w", err)
 		}
 	}
 

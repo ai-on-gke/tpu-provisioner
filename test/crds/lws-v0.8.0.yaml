@@ -18222,7 +18222,7 @@ spec:
         - --zap-log-level=2
         command:
         - /manager
-        image: us-central1-docker.pkg.dev/k8s-staging-images/lws/lws:v0.8.0
+        image: registry.k8s.io/lws/lws:v0.8.0
         livenessProbe:
           httpGet:
             path: /healthz
