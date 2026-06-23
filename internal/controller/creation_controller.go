@@ -23,10 +23,12 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
+	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/utils"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -34,10 +36,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
-
-// When this pod label is set to "true", the TPU provisioner will not reconcile the pod.
-const DisableAutoProvisioningLabel = "tpu-provisioner.cloud.google.com/disable-autoprovisioning"
 
 // CreationReconciler watches Pods and creates Node Pools.
 type CreationReconciler struct {
@@ -71,6 +71,24 @@ func (r *CreationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("getting pod: %w", err)
+	}
+
+	// NOTE: Reconcile() is already filtered down to Pods that decend from JobSets
+	jobSetName := jobSetForPod(&pod)
+	var js jobset.JobSet
+	if err := r.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: jobSetName}, &js); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Requeue with a delay in case the JobSet cache is not up to date with the Pod cache.
+			return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("getting jobset %s/%s for pod %s/%s: %w",
+			js.Namespace, js.Name,
+			pod.Namespace, pod.Name,
+			err)
+	}
+	if utils.SliceProvisioningEnabled(&js) {
+		lg.Info("ignoring nodepool autoprovisioning since slice provisioning is enabled", "label", utils.SliceProvisioningLabel)
+		return ctrl.Result{}, nil
 	}
 
 	lg.Info("Ensuring node pool for unschedulable pod")
@@ -110,7 +128,7 @@ func (r *CreationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				isUnschedulable(pod) &&
 				doesRequestResource(pod, r.PodCriteria.ResourceType) &&
 				hasNodeSelectors(pod, cloud.GKETPUNodeSelector) &&
-				!autoProvisioningDisabled(pod) &&
+				!utils.AutoProvisioningDisabled(pod) &&
 				!podDeleted(pod)
 		})).
 		Complete(r)
