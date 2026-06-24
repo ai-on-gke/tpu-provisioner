@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
@@ -111,6 +112,10 @@ var _ = BeforeSuite(func() {
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: "127.0.0.1:0",
+		},
+		HealthProbeBindAddress: "127.0.0.1:0",
 	})
 	Expect(err).ToNot(HaveOccurred())
 
