@@ -12,6 +12,15 @@ Node Pools are cleaned up when the JobSet whose pods triggered the node pool cre
 
 ## Setup
 
+### Export the Environment Variables
+```bash
+GCP_PROJECT_ID=<YOUR_GCP_PROJECT_ID> \
+GCP_CLUSTER_LOCATION=<YOUR_CLUSTER_LOCATION> \
+GCP_ZONE=<YOUR_ZONE> \
+GCP_CLUSTER=<YOUR_CLUSTER_NAME> \
+GCP_NODE_SERVICE_ACCOUNT=<YOUR_SERVICE_ACCOUNT>
+```
+
 ### Create a GKE Cluster with workload identity enabled and no release channel
 
 The TPU Provisioner requires [Workload Identity for GKE](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) to be enabled, and cannot be on a release channel (auto upgrades
@@ -71,11 +80,14 @@ a directory structure like follows:
 
 `${REPO_ROOT}/deploy/${PROJECT_ID}/${CLUSTER_NAME}`
 
-You will need to create the `deploy/${PROJECT_ID}/${CLUSTER_NAME}` directory for each you cluster you deploy
+You will need to create the `deploy/${PROJECT_ID}/${CLUSTER_NAME}` directory for each your cluster you deploy
 the provisioner on.
+```bash
+mkdir ./deploy/${PROJECT_ID}/${CLUSTER_NAME}
+```
 
-Next, copy the files from `deploy/example-project/example-cluster` into your new `deploy/${PROJECT_ID}/${CLUSTER_NAME}`
-directory and update the templated values in the yaml files to match your own.
+Update the templated values in the yaml files under ./examples dir to match your own.
+Under `${REPO_ROOT}/deploy/${PROJECT_ID}/${CLUSTER_NAME}` you would have files such as `kustomization.yaml`, `manager_patch.yaml`, `serviceaccount_patch.yaml`
 
 ### Building and Deploying the Controller
 
@@ -150,11 +162,11 @@ gcloud config set auth/impersonate_service_account ${PROVISIONER_SERVICE_ACCOUNT
 Run the controller (this will run in the foreground, so switch to a new terminal if you want to leave it running), for example:
 
 ```bash
-GCP_PROJECT_ID=your-project \
+export GCP_PROJECT_ID=your-project \
 GCP_CLUSTER_LOCATION=your-cluster-region \
 GCP_ZONE=your-tpu-zone \
 GCP_CLUSTER=your-cluster \
-GCP_NODE_SERVICE_ACCOUNT=YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com \
+GCP_NODE_SERVICE_ACCOUNT=YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com \ &&
 make run
 ```
 
@@ -163,7 +175,7 @@ make run
 Test that you can apply a TPU Job.
 
 ```bash
-kubectl apply -f ./examples/v4-2x2x4/
+kubectl apply -f ./examples/ironwood-jobset-32.yaml/
 ```
 
 
