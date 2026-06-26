@@ -162,11 +162,6 @@ gcloud config set auth/impersonate_service_account ${PROVISIONER_SERVICE_ACCOUNT
 Run the controller (this will run in the foreground, so switch to a new terminal if you want to leave it running), for example:
 
 ```bash
-export GCP_PROJECT_ID=your-project \
-GCP_CLUSTER_LOCATION=your-cluster-region \
-GCP_ZONE=your-tpu-zone \
-GCP_CLUSTER=your-cluster \
-GCP_NODE_SERVICE_ACCOUNT=YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com \ &&
 make run
 ```
 
