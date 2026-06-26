@@ -80,7 +80,7 @@ a directory structure like follows:
 
 `${REPO_ROOT}/deploy/${PROJECT_ID}/${CLUSTER_NAME}`
 
-You will need to create the `deploy/${PROJECT_ID}/${CLUSTER_NAME}` directory for each your cluster you deploy
+You will need to create the `deploy/${PROJECT_ID}/${CLUSTER_NAME}` directory for each cluster you deploy
 the provisioner on.
 ```bash
 mkdir ./deploy/${PROJECT_ID}/${CLUSTER_NAME}
