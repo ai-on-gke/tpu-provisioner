@@ -82,12 +82,12 @@ a directory structure like follows:
 
 You will need to create the `deploy/${GCP_PROJECT_ID}/${GCP_CLUSTER}` directory for each cluster you deploy
 the provisioner on.
-```bash
-mkdir ./deploy/${PROJECT_ID}/${GCP_CLUSTER}
-```
 
-Update the templated values in the yaml files under ./examples dir to match your own.
-Under `${REPO_ROOT}/deploy/${GCP_PROJECT_ID}/${GCP_CLUSTER}` you would have files such as `kustomization.yaml`, `manager_patch.yaml`, `serviceaccount_patch.yaml`
+Next, copy the files from `deploy/example-project/example-cluster-v5p` for `v5p`tpu type or `deploy/example-project/example-cluster-v7x` for `v7x` tpu type into your new `deploy/${PROJECT_ID}/${CLUSTER_NAME}` directory.
+
+For `v6e` use the same Templates for `v5p`
+
+Update the templated values in the .yaml files to match your own.
 
 ### Building and Deploying the Controller
 
