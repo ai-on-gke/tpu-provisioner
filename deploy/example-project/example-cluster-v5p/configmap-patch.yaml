@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: manager
+  namespace: tpu-provisioner-system
+data:
+  GCP_PROJECT_ID: <GCP_PROJECT_ID>
+  GCP_CLUSTER_LOCATION: <GCP_CLUSTER_LOCATION>
+  GCP_ZONE: <GCP_ZONE>
+  GCP_CLUSTER: <GCP_CLUSTER>
+  GCP_NODE_SERVICE_ACCOUNT: "<PROJECT_NUMBER>-compute@developer.gserviceaccount.com"
+  GCP_NODE_TAGS: "allow-internet-egress"
+  ENABLE_SLICE_CONTROLLER: "false"
+  ENABLE_WEBHOOKS: "false"
