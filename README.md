@@ -12,6 +12,15 @@ Node Pools are cleaned up when the JobSet whose pods triggered the node pool cre
 
 ## Setup
 
+### Export the Environment Variables
+```bash
+GCP_PROJECT_ID=your-project \
+GCP_CLUSTER_LOCATION=your-cluster-region \
+GCP_ZONE=your-tpu-zone \
+GCP_CLUSTER=your-cluster \
+GCP_NODE_SERVICE_ACCOUNT=YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com
+```
+
 ### Create a GKE Cluster with workload identity enabled and no release channel
 
 The TPU Provisioner requires [Workload Identity for GKE](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) to be enabled, and cannot be on a release channel (auto upgrades
@@ -47,13 +56,13 @@ k8s service account `tpu-provisioner-controller-manageer` to authenticate with W
 
 ```sh
 gcloud iam service-accounts create tpu-provisioner
-export PROVISIONER_SERVICE_ACCOUNT=tpu-provisioner@${PROJECT_ID}.iam.gserviceaccount.com
+export PROVISIONER_SERVICE_ACCOUNT=tpu-provisioner@${GCP_PROJECT_ID}.iam.gserviceaccount.com
 ```
 
 Give the Service Accounts permissions to administer GKE clusters.
 
 ```bash
-gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${PROVISIONER_SERVICE_ACCOUNT}" --role='roles/container.clusterAdmin'
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID --member="serviceAccount:${PROVISIONER_SERVICE_ACCOUNT}" --role='roles/container.clusterAdmin'
 ```
 
 Bind the GCP Service Account to the Kubernetes Service Account that will be attached to the controller Pod.
@@ -61,7 +70,7 @@ Bind the GCP Service Account to the Kubernetes Service Account that will be atta
 ```sh
 gcloud iam service-accounts add-iam-policy-binding ${PROVISIONER_SERVICE_ACCOUNT} \
     --role roles/iam.workloadIdentityUser \
-    --member "serviceAccount:${PROJECT_ID}.svc.id.goog[tpu-provisioner-system/tpu-provisioner-controller-manager]"
+    --member "serviceAccount:${GCP_PROJECT_ID}.svc.id.goog[tpu-provisioner-system/tpu-provisioner-controller-manager]"
 ```
 
 The tpu-provisioner service account will also need `iam.serviceAccountUser` on the service account to be used by the nodes in the nodepool:
@@ -79,25 +88,23 @@ gcloud iam service-accounts add-iam-policy-binding ${NODE_SERVICE_ACCOUNT} \
 TPU Provisioner deployment configurations are defined on a per cluster level, using config files which live in
 a directory structure like follows:
 
-`${REPO_ROOT}/deploy/${PROJECT_ID}/${CLUSTER_NAME}`
+`${REPO_ROOT}/deploy/${GCP_PROJECT_ID}/${GCP_CLUSTER}`
 
-You will need to create the `deploy/${PROJECT_ID}/${CLUSTER_NAME}` directory for each you cluster you deploy
+You will need to create the `deploy/${GCP_PROJECT_ID}/${GCP_CLUSTER}` directory for each cluster you deploy
 the provisioner on.
 
-Next, copy the files from `deploy/example-project/example-cluster` into your new `deploy/${PROJECT_ID}/${CLUSTER_NAME}`
-directory and update the templated values in the yaml files to match your own.
+Next, copy the files from `deploy/example-project/example-cluster-v5p` for `v5p`tpu type or `deploy/example-project/example-cluster-v7x` for `v7x` tpu type into your new `deploy/${PROJECT_ID}/${CLUSTER_NAME}` directory.
+
+For `v6e` use the same Templates for `v5p`
+
+Update the templated values in the .yaml files to match your own.
 
 ### Building and Deploying the Controller
 
-Build and push your image. For example:
+Build and push your image:
 
 ```bash
-export PROJECT_ID=example-project
-export CLUSTER_NAME=example-cluster
-```
-
-```bash
-export CONTAINER_IMAGE=us-docker.pkg.dev/${PROJECT_ID}/default/tpu-provisioner:$(git rev-parse --short HEAD)
+export CONTAINER_IMAGE=us-docker.pkg.dev/${GCP_PROJECT_ID}/default/tpu-provisioner:$(git rev-parse --short HEAD)
 make docker-build docker-push IMG=${CONTAINER_IMAGE}
 ```
 
@@ -111,17 +118,17 @@ gcloud builds submit --tag $CONTAINER_IMAGE --project=$PROJECT_ID .
 Set the container image in the manifests.
 
 ```bash
-cd ./deploy/${PROJECT_ID}/${CLUSTER_NAME}
+cd ./deploy/${GCP_PROJECT_ID}/${GCP_CLUSTER}
 kustomize edit set image controller=${CONTAINER_IMAGE}
 cd -
 ```
 
-Edit the settings in the `./deploy/${PROJECT_ID}/${CLUSTER_NAME}/` directory to match your project (ConfigMap values and ServiceAccount annotation).
+Edit the settings in the `./deploy/${GCP_PROJECT_ID}/${GCP_CLUSTER}/` directory to match your project (ConfigMap values and ServiceAccount annotation).
 
 Deploy controller.
 
 ```sh
-kubectl apply --server-side -k ./deploy/${PROJECT_ID}/${CLUSTER_NAME}
+kubectl apply --server-side -k ./deploy/${GCP_PROJECT_ID}/${GCP_CLUSTER}
 ```
 
 
@@ -157,21 +164,16 @@ For local development and quick manual testing, you can do the following:
 
 Note you’ll need a Kubernetes cluster to run against.
 
-Impersonate the Service Account created above, for example:
+Impersonate the Service Account created above:
 
 ```bash
-# Assuming you have PROJECT_ID set in your environment...
+# Assuming you have GCP_PROJECT_ID set in your environment...
 gcloud config set auth/impersonate_service_account ${PROVISIONER_SERVICE_ACCOUNT}
 ```
 
-Run the controller (this will run in the foreground, so switch to a new terminal if you want to leave it running), for example:
+Run the controller (this will run in the foreground, so switch to a new terminal if you want to leave it running):
 
 ```bash
-GCP_PROJECT_ID=your-project \
-GCP_CLUSTER_LOCATION=your-cluster-region \
-GCP_ZONE=your-tpu-zone \
-GCP_CLUSTER=your-cluster \
-GCP_NODE_SERVICE_ACCOUNT=YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com \
 make run
 ```
 
@@ -180,7 +182,7 @@ make run
 Test that you can apply a TPU Job.
 
 ```bash
-kubectl apply -f ./examples/v4-2x2x4/
+kubectl apply -f ./examples/ironwood-jobset-32.yaml/
 ```
 
 ### Ironwood / tpu7x support
