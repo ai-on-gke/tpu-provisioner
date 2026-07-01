@@ -1,0 +1,247 @@
+apiVersion: v1
+items:
+- apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    annotations:
+      leaderworkerset.sigs.k8s.io/replicas: "2"
+    creationTimestamp: "2026-02-09T21:49:45Z"
+    generation: 1
+    labels:
+      leaderworkerset.sigs.k8s.io/name: example-2
+      leaderworkerset.sigs.k8s.io/template-revision-hash: 5df54c45dd
+    name: example-2
+    namespace: default
+    ownerReferences:
+    - apiVersion: leaderworkerset.x-k8s.io/v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: LeaderWorkerSet
+      name: example-2
+      uid: 214ec26c-08ed-4080-b692-4c753e565cab
+    resourceVersion: "88991"
+    uid: 07359de8-669b-44c3-aa8e-d38daddad161
+  spec:
+    persistentVolumeClaimRetentionPolicy:
+      whenDeleted: Retain
+      whenScaled: Retain
+    podManagementPolicy: Parallel
+    replicas: 2
+    revisionHistoryLimit: 10
+    selector:
+      matchLabels:
+        leaderworkerset.sigs.k8s.io/name: example-2
+        leaderworkerset.sigs.k8s.io/worker-index: "0"
+    serviceName: example-2
+    template:
+      metadata:
+        annotations:
+          leaderworkerset.sigs.k8s.io/size: "33"
+        creationTimestamp: null
+        labels:
+          kwok-simulated-job: "true"
+          leaderworkerset.sigs.k8s.io/name: example-2
+          leaderworkerset.sigs.k8s.io/template-revision-hash: 5df54c45dd
+          leaderworkerset.sigs.k8s.io/worker-index: "0"
+      spec:
+        containers:
+        - image: nginx:latest
+          imagePullPolicy: Always
+          name: leader
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        terminationGracePeriodSeconds: 30
+    updateStrategy:
+      rollingUpdate:
+        partition: 0
+      type: RollingUpdate
+  status:
+    availableReplicas: 2
+    collisionCount: 0
+    currentReplicas: 2
+    currentRevision: example-2-7fb48bfd
+    observedGeneration: 1
+    readyReplicas: 2
+    replicas: 2
+    updateRevision: example-2-7fb48bfd
+    updatedReplicas: 2
+- apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    creationTimestamp: "2026-02-09T21:49:45Z"
+    generation: 1
+    labels:
+      leaderworkerset.sigs.k8s.io/group-index: "0"
+      leaderworkerset.sigs.k8s.io/group-key: 4eb08a2ea04024c042666c3f2030293ab831f272
+      leaderworkerset.sigs.k8s.io/name: example-2
+      leaderworkerset.sigs.k8s.io/template-revision-hash: 5df54c45dd
+    name: example-2-0
+    namespace: default
+    ownerReferences:
+    - apiVersion: v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: Pod
+      name: example-2-0
+      uid: 8692b21d-b597-49e8-a86f-61abca75e0d2
+    resourceVersion: "89604"
+    uid: fe837285-8ed7-4d9c-9cb9-d995f8202120
+  spec:
+    ordinals:
+      start: 1
+    persistentVolumeClaimRetentionPolicy:
+      whenDeleted: Retain
+      whenScaled: Retain
+    podManagementPolicy: Parallel
+    replicas: 32
+    revisionHistoryLimit: 10
+    selector:
+      matchLabels:
+        leaderworkerset.sigs.k8s.io/group-index: "0"
+        leaderworkerset.sigs.k8s.io/group-key: 4eb08a2ea04024c042666c3f2030293ab831f272
+        leaderworkerset.sigs.k8s.io/name: example-2
+    serviceName: example-2
+    template:
+      metadata:
+        annotations:
+          cloud.google.com/gke-tpu-topology: 4x4x8
+          leaderworkerset.sigs.k8s.io/leader-name: example-2-0
+          leaderworkerset.sigs.k8s.io/size: "33"
+        creationTimestamp: null
+        labels:
+          kwok-simulated-job: "true"
+          leaderworkerset.sigs.k8s.io/group-index: "0"
+          leaderworkerset.sigs.k8s.io/group-key: 4eb08a2ea04024c042666c3f2030293ab831f272
+          leaderworkerset.sigs.k8s.io/name: example-2
+          leaderworkerset.sigs.k8s.io/template-revision-hash: 5df54c45dd
+          tpu-provisioner.cloud.google.com/inject-slice-selector: "true"
+      spec:
+        containers:
+        - image: nginx:latest
+          imagePullPolicy: Always
+          name: worker
+          resources:
+            limits:
+              google.com/tpu: "4"
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+        dnsPolicy: ClusterFirst
+        nodeSelector:
+          cloud.google.com/gke-tpu-accelerator: tpu7x
+          cloud.google.com/gke-tpu-slice: lws-example-2-214ec26c-worker-0
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        terminationGracePeriodSeconds: 30
+        tolerations:
+        - effect: NoSchedule
+          key: google.com/tpu
+          operator: Exists
+    updateStrategy:
+      rollingUpdate:
+        partition: 0
+      type: RollingUpdate
+  status:
+    availableReplicas: 32
+    collisionCount: 0
+    currentReplicas: 32
+    currentRevision: example-2-0-6966c98f5b
+    observedGeneration: 1
+    readyReplicas: 32
+    replicas: 32
+    updateRevision: example-2-0-6966c98f5b
+    updatedReplicas: 32
+- apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    creationTimestamp: "2026-02-09T21:49:45Z"
+    generation: 1
+    labels:
+      leaderworkerset.sigs.k8s.io/group-index: "1"
+      leaderworkerset.sigs.k8s.io/group-key: 47cd663581b35ba28428788e29a7d06b917cc3b4
+      leaderworkerset.sigs.k8s.io/name: example-2
+      leaderworkerset.sigs.k8s.io/template-revision-hash: 5df54c45dd
+    name: example-2-1
+    namespace: default
+    ownerReferences:
+    - apiVersion: v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: Pod
+      name: example-2-1
+      uid: 87a727f4-251e-4141-8e96-3efec13e8131
+    resourceVersion: "89722"
+    uid: efcb1801-4379-4f24-959f-90c83c27969b
+  spec:
+    ordinals:
+      start: 1
+    persistentVolumeClaimRetentionPolicy:
+      whenDeleted: Retain
+      whenScaled: Retain
+    podManagementPolicy: Parallel
+    replicas: 32
+    revisionHistoryLimit: 10
+    selector:
+      matchLabels:
+        leaderworkerset.sigs.k8s.io/group-index: "1"
+        leaderworkerset.sigs.k8s.io/group-key: 47cd663581b35ba28428788e29a7d06b917cc3b4
+        leaderworkerset.sigs.k8s.io/name: example-2
+    serviceName: example-2
+    template:
+      metadata:
+        annotations:
+          cloud.google.com/gke-tpu-topology: 4x4x8
+          leaderworkerset.sigs.k8s.io/leader-name: example-2-1
+          leaderworkerset.sigs.k8s.io/size: "33"
+        creationTimestamp: null
+        labels:
+          kwok-simulated-job: "true"
+          leaderworkerset.sigs.k8s.io/group-index: "1"
+          leaderworkerset.sigs.k8s.io/group-key: 47cd663581b35ba28428788e29a7d06b917cc3b4
+          leaderworkerset.sigs.k8s.io/name: example-2
+          leaderworkerset.sigs.k8s.io/template-revision-hash: 5df54c45dd
+          tpu-provisioner.cloud.google.com/inject-slice-selector: "true"
+      spec:
+        containers:
+        - image: nginx:latest
+          imagePullPolicy: Always
+          name: worker
+          resources:
+            limits:
+              google.com/tpu: "4"
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+        dnsPolicy: ClusterFirst
+        nodeSelector:
+          cloud.google.com/gke-tpu-accelerator: tpu7x
+          cloud.google.com/gke-tpu-slice: lws-example-2-214ec26c-worker-1
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        terminationGracePeriodSeconds: 30
+        tolerations:
+        - effect: NoSchedule
+          key: google.com/tpu
+          operator: Exists
+    updateStrategy:
+      rollingUpdate:
+        partition: 0
+      type: RollingUpdate
+  status:
+    availableReplicas: 32
+    collisionCount: 0
+    currentReplicas: 32
+    currentRevision: example-2-1-7b965958c6
+    observedGeneration: 1
+    readyReplicas: 32
+    replicas: 32
+    updateRevision: example-2-1-7b965958c6
+    updatedReplicas: 32
+kind: List
+metadata:
+  resourceVersion: ""
