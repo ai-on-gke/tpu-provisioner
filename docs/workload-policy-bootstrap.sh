@@ -1,12 +1,14 @@
 #!/bin/bash
 #
 # This script creates a 'HIGH_THROUGHPUT' workload resource policy
-# for each TPU topology defined in the `supported_topologies` array.
-
+# for each TPU topology defined in the external file specified by TOPOLOGY_FILE.
+#
 # --- Configuration ---
-# Please set the PROJECT_ID and REGION environment variables before running.
+# Set the following environment variables before running:
 # export PROJECT_ID="your-gcp-project"
 # export REGION="your-gcp-region"
+# export TOPOLOGY_FILE="topology-ref-tpu7x.txt"
+# export WORKLOAD_POLICY_NAME_PREFIX="tpu-provisioner-" (Optional, defaults to tpu-provisioner-)
 
 # Exit if any command fails
 set -e
@@ -21,122 +23,52 @@ if [[ -z "${REGION}" ]]; then
   exit 1
 fi
 
-supported_topologies=(
-    '12x12x12'
-    '12x12x16'
-    '12x12x20'
-    '12x12x24'
-    '12x12x28'
-    '12x12x36'
-    '12x16x16'
-    '12x16x20'
-    '12x16x24'
-    '12x16x28'
-    '12x20x20'
-    '12x20x24'
-    '12x24x24'
-    '16x16x16'
-    '16x16x20'
-    '16x16x24'
-    '16x16x32'
-    '16x20x28'
-    '16x24x24'
-    '2x2x1'
-    '2x2x2'
-    '2x2x4'
-    '2x4x4'
-    '4x12x116'
-    '4x12x12'
-    '4x12x124'
-    '4x12x20'
-    '4x12x28'
-    '4x12x44'
-    '4x12x52'
-    '4x12x68'
-    '4x12x76'
-    '4x12x92'
-    '4x20x20'
-    '4x20x28'
-    '4x20x44'
-    '4x20x52'
-    '4x20x68'
-    '4x20x76'
-    '4x28x28'
-    '4x28x44'
-    '4x28x52'
-    '4x4x116'
-    '4x4x12'
-    '4x4x124'
-    '4x4x148'
-    '4x4x164'
-    '4x4x172'
-    '4x4x188'
-    '4x4x20'
-    '4x4x212'
-    '4x4x236'
-    '4x4x244'
-    '4x4x28'
-    '4x4x4'
-    '4x4x44'
-    '4x4x52'
-    '4x4x68'
-    '4x4x76'
-    '4x4x8'
-    '4x4x92'
-    '4x8x116'
-    '4x8x12'
-    '4x8x124'
-    '4x8x148'
-    '4x8x164'
-    '4x8x172'
-    '4x8x188'
-    '4x8x20'
-    '4x8x28'
-    '4x8x44'
-    '4x8x52'
-    '4x8x68'
-    '4x8x76'
-    '4x8x8'
-    '4x8x92'
-    '8x12x12'
-    '8x12x16'
-    '8x12x20'
-    '8x12x28'
-    '8x12x44'
-    '8x12x52'
-    '8x16x16'
-    '8x16x20'
-    '8x16x28'
-    '8x16x44'
-    '8x20x20'
-    '8x20x28'
-    '8x8x12'
-    '8x8x16'
-    '8x8x20'
-    '8x8x28'
-    '8x8x44'
-    '8x8x52'
-    '8x8x68'
-    '8x8x76'
-    '8x8x8'
-    '8x8x92'
-)
+if [[ -z "${TOPOLOGY_FILE}" ]]; then
+  echo "Error: TOPOLOGY_FILE environment variable is not set."
+  exit 1
+fi
 
-for topology in "${supported_topologies[@]}"; do
+if [[ ! -f "${TOPOLOGY_FILE}" ]]; then
+  echo "Error: Topology file '${TOPOLOGY_FILE}' does not exist."
+  exit 1
+fi
+
+# Set default prefix if not provided
+WORKLOAD_POLICY_NAME_PREFIX="${WORKLOAD_POLICY_NAME_PREFIX:-tpu-provisioner-}"
+
+echo "--- Configuration Parameters ---"
+echo "PROJECT_ID: ${PROJECT_ID}"
+echo "REGION: ${REGION}"
+echo "TOPOLOGY_FILE: ${TOPOLOGY_FILE}"
+echo "WORKLOAD_POLICY_NAME_PREFIX: ${WORKLOAD_POLICY_NAME_PREFIX}"
+echo "--------------------------------"
+
+echo "Fetching existing resource policies matching prefix '${WORKLOAD_POLICY_NAME_PREFIX}'..."
+existing_policies=$(gcloud compute resource-policies list --filter="region:${REGION} AND name~^${WORKLOAD_POLICY_NAME_PREFIX}" --format="value(name)" --project="${PROJECT_ID}")
+
+while IFS= read -r topology || [[ -n "${topology}" ]]; do
+  # Skip empty lines and comments
+  [[ -z "${topology}" ]] && continue
+  [[ "${topology}" =~ ^#.*$ ]] && continue
+
   # creates a workload policy for each topology
-  workload_policy_name="tpu-provisioner-${topology}"
+  workload_policy_name="${WORKLOAD_POLICY_NAME_PREFIX}${topology}"
 
-  echo "Creating resource policy '${workload_policy_name}' for topology '${topology}'..."
+  # Check if policy already exists
+  if echo "${existing_policies}" | grep -Fxq "${workload_policy_name}"; then
+    echo "Resource policy '${workload_policy_name}' already exists. Skipping."
+  else
+    echo "Processing resource policy '${workload_policy_name}' for topology '${topology}'..."
+    echo "Creating resource policy '${workload_policy_name}'..."
+    gcloud compute resource-policies create workload-policy "${workload_policy_name}" \
+      --type=HIGH_THROUGHPUT \
+      --accelerator-topology="${topology}" \
+      --project="${PROJECT_ID}" \
+      --region="${REGION}"
+    echo "Successfully created policy '${workload_policy_name}'."
+    echo "---"
+    sleep 1
+  fi
+done < "${TOPOLOGY_FILE}"
 
-  gcloud compute resource-policies create workload-policy "${workload_policy_name}" \
-    --type=HIGH_THROUGHPUT \
-    --accelerator-topology="${topology}" \
-    --project="${PROJECT_ID}" \
-    --region="${REGION}"
-
-  echo "Successfully created policy '${workload_policy_name}'."
-  echo "---"
-  sleep 1
-done
-
-echo "All resource policies created."
+echo "All resource policies processed."
