@@ -64,16 +64,31 @@ vet: ## Run go vet against code.
 
 JOBSET_VERSION ?= "v0.11.1"
 LWS_VERSION ?= "v0.8.0"
+GINKGO_ARGS ?= --procs=$(shell echo $$(( $$(nproc) / 2 )))
 
 .PHONY: test-unit
 test-unit: manifests fmt vet ## Run unit tests.
 	go test ./cmd/... ./internal/... -v -coverprofile cover-unit.out
 
+.PHONY: download-crds
+download-crds: ## Download Custom Resource Definitions (CRDs) for tests if not present.
+	mkdir -p test/crds
+	@[ -f test/crds/jobset-$(JOBSET_VERSION).yaml ] || { \
+		echo "Downloading JobSet CRD..."; \
+		curl -sSL https://github.com/kubernetes-sigs/jobset/releases/download/$(JOBSET_VERSION)/manifests.yaml > test/crds/jobset-$(JOBSET_VERSION).yaml; \
+	}
+	@[ -f test/crds/lws-$(LWS_VERSION).yaml ] || { \
+		echo "Downloading LWS CRD..."; \
+		curl -sSL https://github.com/kubernetes-sigs/lws/releases/download/$(LWS_VERSION)/manifests.yaml > test/crds/lws-$(LWS_VERSION).yaml; \
+	}
+
 .PHONY: test-integration
-test-integration: manifests fmt vet envtest ## Run integration tests.
-	curl -L https://github.com/kubernetes-sigs/jobset/releases/download/$(JOBSET_VERSION)/manifests.yaml > test/crds/jobset-$(JOBSET_VERSION).yaml
-	curl -L https://github.com/kubernetes-sigs/lws/releases/download/$(LWS_VERSION)/manifests.yaml > test/crds/lws-$(LWS_VERSION).yaml
+test-integration: manifests fmt vet envtest download-crds ## Run integration tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./test/integration/... -v -coverprofile cover-integration.out
+
+.PHONY: test-integration-parallel
+test-integration-parallel: manifests fmt vet envtest ginkgo download-crds ## Run integration tests in parallel using Ginkgo.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" $(GINKGO) $(GINKGO_ARGS) ./test/integration/...
 
 .PHONY: test
 test: test-unit test-integration ## Run all tests.
@@ -133,11 +148,13 @@ $(LOCALBIN):
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
+GINKGO ?= $(LOCALBIN)/ginkgo
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v4.5.7
 CONTROLLER_TOOLS_VERSION ?= v0.11.1
 ENVTEST_VERSION ?= release-0.19
+GINKGO_VERSION ?= v2.27.5
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize
@@ -159,6 +176,11 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+.PHONY: ginkgo
+ginkgo: $(GINKGO) ## Download ginkgo locally if necessary.
+$(GINKGO): $(LOCALBIN)
+	$(call go-install-tool,$(GINKGO),github.com/onsi/ginkgo/v2/ginkgo,$(GINKGO_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
