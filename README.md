@@ -249,6 +249,9 @@ This key contains the configuration for the nodepools that will be created. The 
 
 Some configuration parameters are set via environment variables for the provisioner itself. These provide the default values for nodepools managed by the provisioner:
 
+*   `CONCURRENCY`: (Optional) The maximum number of concurrent reconcile operations for dynamic provisioning. Defaults to `3`.
+*   `BACKOFF_BASE_DELAY`: (Optional) The base delay for exponential backoff on retriable errors. Defaults to `5s`.
+*   `BACKOFF_MAX_DELAY`: (Optional) The maximum delay for exponential backoff on retriable errors. Defaults to `5m`.
 *   `GKE_MAX_PODS_PER_NODE`: (Optional) The maximum number of pods that can run on a node. Defaults to `15`. 
     *   For **dynamic nodepools**, this is used for all provisioned node pools.
     *   For **static nodepools**, this is the default value if `maxPodsPerNode` is not specified in the 
@@ -260,6 +263,8 @@ Some configuration parameters come from environment variables rather than the co
 
 ```bash
 STATIC_NODEPOOL_CREATE_CONCURRENCY: "3"
+BACKOFF_BASE_DELAY: "5s"
+BACKOFF_MAX_DELAY: "5m"
 GCP_PROJECT_ID: my-project
 GCP_CLUSTER_LOCATION: us-central1
 GCP_ZONE: us-central1-c

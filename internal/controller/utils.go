@@ -1,9 +1,13 @@
 package controller
 
 import (
+	"time"
+
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/util/workqueue"
+	ctrl "sigs.k8s.io/controller-runtime"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
@@ -97,4 +101,9 @@ func acceleratorsForJobSet(js *jobset.JobSet) map[string]bool {
 	}
 
 	return acc
+}
+
+// defaultRateLimiter returns a RateLimiter that implements per-item exponential backoff.
+func defaultRateLimiter(baseDelay, maxDelay time.Duration) workqueue.TypedRateLimiter[ctrl.Request] {
+	return workqueue.NewTypedItemExponentialFailureRateLimiter[ctrl.Request](baseDelay, maxDelay)
 }
