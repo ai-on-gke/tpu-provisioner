@@ -35,7 +35,7 @@ then click on your cluster to pull up settings that can be configured. Find the 
 edit button and select `No channel`.
 
 Also note, if you plan to [preload container images via secondary boot disks](https://cloud.google.com/kubernetes-engine/docs/how-to/data-container-image-preloading#create-cluster-secondary-disk) to reduce pod startup latency, you'll
-need to enable image streaming, as described in the linked docs.
+need to set the `ENABLE_IMAGE_STREAMING` configuration to `true` in the TPU Provisioner environment. If `ENABLE_IMAGE_STREAMING` is `false`, any provided secondary boot disk configuration will be ignored and a warning will be logged. Setting `ENABLE_IMAGE_STREAMING` to `true` also enables `GcfsConfig` on the provisioned GKE node pools, while setting it to `false` explicitly disables it to override cluster-wide defaults.
 
 ### Install JobSet
 
@@ -259,6 +259,10 @@ Some configuration parameters are set via environment variables for the provisio
     
     In GKE, the system default is 110. For large clusters, using the default of 110 can result in quickly exceeding the available IP space in the cluster's pod IP range. Setting a lower value like the `tpu-provisioner` default of 15 is recommended for TPU-intensive workloads where each node typically only runs a single large pod.
 
+*   `ENABLE_IMAGE_STREAMING`: (Optional) Whether to enable GKE Image Streaming (`GcfsConfig`) on dynamic and static node pools. Defaults to `false`.
+    *   If `true`, `GcfsConfig.Enabled` is set to `true` on the node pools, and any configured `GCP_NODE_SECONDARY_DISK` (secondary boot disk) is populated.
+    *   If `false`, `GcfsConfig.Enabled` is explicitly set to `false` and `GCP_NODE_SECONDARY_DISK` if present is ignored (with a logged warning).
+
 Some configuration parameters come from environment variables rather than the configmap, particularly those that are shared across both statically and dynamically created nodepools managed by the provisioner. This includes the following environment variables typically set in the manager configmap (note that the `STATIC_NODEPOOL_CREATE_CONCURRENCY` environment variable is distinct from the `CONCURRENCY` environment variable to allow for separate nodepool create operation limits between static and dynamic nodepools):
 
 ```bash
@@ -273,6 +277,7 @@ GCP_NODE_ADDITIONAL_NETWORKS: test-network:test-subnet
 GCP_NODE_TAGS: test-tag
 GCP_NODE_SERVICE_ACCOUNT: my-service-account-email
 GKE_MAX_PODS_PER_NODE: "15"
+ENABLE_IMAGE_STREAMING: "false"
 ```
 
 Nodepools created by the static provisioner are labeled with `tpu-provisioner-static-nodepool` in order to ensure that their lifecycle is managed independently of dynamic nodepools. Nodepools with this label are omitted from the standard garbage collection loop used for dynamically-provisioned nodepools, and are instead cleaned up when their corresponding subblock, block, or reservation specifications are removed from the configmap.
