@@ -59,10 +59,12 @@ gcloud iam service-accounts create tpu-provisioner
 export PROVISIONER_SERVICE_ACCOUNT=tpu-provisioner@${GCP_PROJECT_ID}.iam.gserviceaccount.com
 ```
 
-Give the Service Accounts permissions to administer GKE clusters.
+Give the Service Account permissions to administer GKE clusters, and write metrics.
 
 ```bash
 gcloud projects add-iam-policy-binding $GCP_PROJECT_ID --member="serviceAccount:${PROVISIONER_SERVICE_ACCOUNT}" --role='roles/container.clusterAdmin'
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID --member="serviceAccount:${PROVISIONER_SERVICE_ACCOUNT}" --role='roles/logging.logWriter'
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID --member="serviceAccount:${PROVISIONER_SERVICE_ACCOUNT}" --role='roles/monitoring.metricWriter'
 ```
 
 Bind the GCP Service Account to the Kubernetes Service Account that will be attached to the controller Pod.
@@ -77,7 +79,7 @@ The tpu-provisioner service account will also need `iam.serviceAccountUser` on t
 
 ```sh
 
-gcloud iam service-accounts add-iam-policy-binding ${NODE_SERVICE_ACCOUNT} \
+gcloud iam service-accounts add-iam-policy-binding ${GCP_NODE_SERVICE_ACCOUNT} \
     --member="serviceAccount:${PROVISIONER_SERVICE_ACCOUNT}" \
     --role="roles/iam.serviceAccountUser" \
     --project=${PROJECT_ID}
@@ -98,6 +100,15 @@ Next, copy the files from `deploy/example-project/example-cluster-v5p` for `v5p`
 For `v6e` use the same Templates for `v5p`
 
 Update the templated values in the .yaml files to match your own.
+
+### OpenTelemetry (OTel) Collector Sidecar
+
+The TPU Provisioner includes an OpenTelemetry (OTel) Collector sidecar in the controller Pod to scrape `controller-runtime` and workqueue metrics from the controller.
+
+* Filters on specific `controller_runtime` metrics and `workqueue` metrics
+* Appends a `tpu.provisioner.` prefix, and exports them directly to Google Managed Service for Prometheus (GMP).
+* Permissions: Metric collection and logging exports to function, the controller's GCP service account must be granted the `roles/monitoring.metricWriter` and `roles/logging.logWriter` IAM roles
+* Configuration in `collector-config` ConfigMap in `config/manager/collector-config.yaml`.
 
 ### Building and Deploying the Controller
 

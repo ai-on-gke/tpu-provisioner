@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collector-config
+  namespace: system
+data:
+  config.yaml: |
+    receivers:
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'tpu-provisioner'
+              scrape_interval: 10s
+              static_configs:
+                - targets: ['127.0.0.1:8080']
+    processors:
+      resourcedetection:
+        detectors: [gcp]
+        timeout: 2s
+        override: false
+      resource:
+        attributes:
+          - key: "service.namespace"
+            value: "tpu-provisioner-system"
+            action: insert
+      filter:
+        metrics:
+          include:
+            match_type: regexp
+            metric_names:
+              - "controller_runtime_reconcile_.*"
+              - "controller_runtime_active_.*"
+              - "controller_runtime_max_.*"
+              - "workqueue_.*"
+      metricstransform:
+        transforms:
+          - include: (.*)
+            match_type: regexp
+            action: update
+            new_name: "tpu.provisioner.$$1"
+    exporters:
+      googlemanagedprometheus:
+    service:
+      pipelines:
+        metrics:
+          receivers: [prometheus]
+          processors: [resourcedetection, resource, filter, metricstransform]
+          exporters: [googlemanagedprometheus]
