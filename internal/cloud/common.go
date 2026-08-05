@@ -58,6 +58,7 @@ type StaticNodePoolConfig struct {
 	MaxPodsPerNode              int64             `yaml:"maxPodsPerNode"`
 	EnableAutoRepair            *bool             `yaml:"enableAutorepair"`
 	PlacementPolicy             string            `yaml:"placementPolicy"`
+	RecreateOnError             *bool             `yaml:"recreateOnError"`
 }
 
 type DesiredStaticNodePool struct {
