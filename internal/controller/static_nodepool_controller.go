@@ -100,14 +100,14 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	var nodepoolConfig cloud.StaticNodePoolConfig
-	if err := yaml.Unmarshal([]byte(nodepoolConfigYAML), &nodepoolConfig); err != nil {
+	nodepoolConfig, err := parseNodepoolConfig(nodepoolConfigYAML)
+	if err != nil {
 		lg.Error(err, "failed to unmarshal nodepoolConfig from configmap", "configmap", req.NamespacedName.String())
 		return ctrl.Result{}, nil
 	}
 
 	// List nodepools that should exist in the cluster based on the configmap.
-	desiredNodePools, err := r.constructDesiredNodePools(reservations, &nodepoolConfig)
+	desiredNodePools, err := r.constructDesiredNodePools(reservations, nodepoolConfig)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get desired nodepools from config: %w", err)
 	}
@@ -302,3 +302,12 @@ func GetInUseNodepools(slices []v1beta1.Slice, nodes []corev1.Node) map[string]b
 	}
 	return inUseNodepools
 }
+
+func parseNodepoolConfig(rawYAML string) (*cloud.StaticNodePoolConfig, error) {
+	var nodepoolConfig cloud.StaticNodePoolConfig
+	if err := yaml.Unmarshal([]byte(rawYAML), &nodepoolConfig); err != nil {
+		return nil, err
+	}
+	return &nodepoolConfig, nil
+}
+
