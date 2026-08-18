@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	container "google.golang.org/api/container/v1beta1"
 	"google.golang.org/api/googleapi"
+	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -1797,7 +1798,9 @@ func TestDiffStaticNodePools(t *testing.T) {
 	desiredAUpdated, hashAUpdated := createDesired("pool-a", "ct5p-hightpu-8t") // Different machine type
 	boolPtr := func(b bool) *bool { return &b }
 	desiredADisabledErrorRecreate, _ := createDesired("pool-a", "ct5p-hightpu-4t")
-	desiredADisabledErrorRecreate.Config.RecreateOnError = boolPtr(false)
+	desiredADisabledErrorRecreate.Config.Lifecycle = StaticNodePoolLifecycleConfig{
+		RecreateOnError: boolPtr(false),
+	}
 
 	if hashA == hashAUpdated {
 		t.Fatalf("hashes should strictly differ for different machine types")
@@ -1979,3 +1982,26 @@ func TestStaticImageStreamingConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestStaticNodePoolConfig_UnmarshalYAML(t *testing.T) {
+	yamlData := `
+machineType: "tpu7x-standard-4t"
+accelerator: "tpu7x"
+topology: "4x4x4"
+nodeCount: 16
+lifecycle:
+  recreateOnError: false
+`
+	var config StaticNodePoolConfig
+	if err := yaml.Unmarshal([]byte(yamlData), &config); err != nil {
+		t.Fatalf("failed to unmarshal yaml: %v", err)
+	}
+
+	if config.MachineType != "tpu7x-standard-4t" {
+		t.Errorf("expected machineType to be 'tpu7x-standard-4t', got %s", config.MachineType)
+	}
+	if config.Lifecycle.RecreateOnError == nil || *config.Lifecycle.RecreateOnError != false {
+		t.Errorf("expected RecreateOnError to be false, got %v", config.Lifecycle.RecreateOnError)
+	}
+}
+

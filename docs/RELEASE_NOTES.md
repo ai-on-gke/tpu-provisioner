@@ -1,5 +1,10 @@
 # Release Notes
 
+## Version 1.3.0
+
+- **Configurable Static Nodepool Error Recreation**: Added `lifecycle.recreateOnError` under `nodepoolConfig` in the static nodepools ConfigMap to allow opting out of automatic deletion and recreation of nodepools in an `ERROR` state (defaults to `true`).
+
+
 ## Version 1.2.0
 - **Otel Collector Sidecar**: Add in otel collector sidecar to scrape tpu-provisioner controller-runtime metrics. Collector adds a "tpu_provisioner" prefix.
 

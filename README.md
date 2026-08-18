@@ -231,6 +231,8 @@ data:
     maxPodsPerNode: 8
     enableAutorepair: true
     placementPolicy: "tpu-provisioner-4x4x4"
+    lifecycle:
+      recreateOnError: true
 ```
 
 #### Configuration Parameters
@@ -255,6 +257,8 @@ This key contains the configuration for the nodepools that will be created. The 
 *   `maxPodsPerNode`: (Optional) The maximum number of pods that can run on a node. For static nodepools, this takes precedence over the global `GKE_MAX_PODS_PER_NODE` environment variable.
 *   `enableAutorepair`: (Optional) `true` or `false` to enable/disable node auto-repair. Defaults to `nil` (GKE default).
 *   `placementPolicy`: (Optional) The placement policy for the nodes (e.g., `COMPACT` or `tpu-provisioner-4x4x4`).
+*   `lifecycle`: (Optional) Lifecycle management settings for the nodepool:
+    *   `recreateOnError`: (Optional) `true` or `false` to enable/disable automatic recreation of nodepools in an `ERROR` state. Defaults to `true`.
 
 ##### Global Defaults (Environment Variables)
 

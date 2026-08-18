@@ -729,12 +729,12 @@ func (g *GKE) DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepo
 		}
 
 		recreateOnError := true
-		if desired.Config != nil && desired.Config.RecreateOnError != nil {
-			recreateOnError = *desired.Config.RecreateOnError
+		if desired.Config != nil && desired.Config.Lifecycle.RecreateOnError != nil {
+			recreateOnError = *desired.Config.Lifecycle.RecreateOnError
 		}
 
 		// If the existing nodepool is in an ERROR state, we should recreate it regardless of whether the config changed or not,
-		// unless RecreateOnError is explicitly set to false.
+		// unless Lifecycle.RecreateOnError is explicitly set to false.
 		if existing.Error && recreateOnError {
 			toDeleteError = append(toDeleteError, desired.Name)
 			toCreate = append(toCreate, desired)
