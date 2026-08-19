@@ -1795,6 +1795,11 @@ func TestDiffStaticNodePools(t *testing.T) {
 	desiredA, hashA := createDesired("pool-a", "ct5p-hightpu-4t")
 	desiredB, _ := createDesired("pool-b", "ct5p-hightpu-4t")
 	desiredAUpdated, hashAUpdated := createDesired("pool-a", "ct5p-hightpu-8t") // Different machine type
+	boolPtr := func(b bool) *bool { return &b }
+	desiredADisabledErrorRecreate, _ := createDesired("pool-a", "ct5p-hightpu-4t")
+	desiredADisabledErrorRecreate.Config.Lifecycle = StaticNodePoolLifecycleConfig{
+		RecreateOnError: boolPtr(false),
+	}
 
 	if hashA == hashAUpdated {
 		t.Fatalf("hashes should strictly differ for different machine types")
@@ -1881,6 +1886,17 @@ func TestDiffStaticNodePools(t *testing.T) {
 			wantCreate:      []string{"pool-a"},
 			wantDeleteError: []string{"pool-a"},
 		},
+		{
+			name: "Delete Error (Retry Disabled)",
+			existing: []NodePoolRef{
+				{
+					Name:   "pool-a",
+					Labels: map[string]string{LabelNodePoolHash: hashA, LabelTPUProvisionerStaticNodepool: "true"},
+					Error:  true,
+				},
+			},
+			desired: []*DesiredStaticNodePool{desiredADisabledErrorRecreate},
+		},
 	}
 
 	for _, tc := range tests {
@@ -1965,3 +1981,4 @@ func TestStaticImageStreamingConfig(t *testing.T) {
 		}
 	})
 }
+

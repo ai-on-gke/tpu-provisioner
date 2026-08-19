@@ -5,6 +5,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/copied/api/v1beta1"
 	"github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/cloud"
+	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -115,3 +116,76 @@ func TestGetInUseNodepools(t *testing.T) {
 		})
 	}
 }
+
+func TestParseNodepoolConfig(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+
+	tests := []struct {
+		name     string
+		yamlData string
+		want     *cloud.StaticNodePoolConfig
+	}{
+		{
+			name: "full config with lifecycle recreateOnError false",
+			yamlData: `
+machineType: "tpu7x-standard-4t"
+accelerator: "tpu7x"
+topology: "4x4x4"
+nodeCount: 16
+nodeLabels:
+  label-key-1: "label-value-1"
+  label-key-2: "label-value-2"
+shieldedIntegrityMonitoring: true
+shieldedSecureBoot: false
+maxPodsPerNode: 8
+enableAutorepair: true
+placementPolicy: "tpu-provisioner-4x4x4"
+lifecycle:
+  recreateOnError: false
+`,
+			want: &cloud.StaticNodePoolConfig{
+				MachineType: "tpu7x-standard-4t",
+				Accelerator: "tpu7x",
+				Topology:    "4x4x4",
+				NodeCount:   16,
+				NodeLabels: map[string]string{
+					"label-key-1": "label-value-1",
+					"label-key-2": "label-value-2",
+				},
+				ShieldedIntegrityMonitoring: boolPtr(true),
+				ShieldedSecureBoot:          boolPtr(false),
+				MaxPodsPerNode:              8,
+				EnableAutoRepair:            boolPtr(true),
+				PlacementPolicy:             "tpu-provisioner-4x4x4",
+				Lifecycle: cloud.StaticNodePoolLifecycleConfig{
+					RecreateOnError: boolPtr(false),
+				},
+			},
+		},
+		{
+			name: "minimal config with omitted lifecycle",
+			yamlData: `
+machineType: "ct5p-hightpu-4t"
+nodeCount: 4
+`,
+			want: &cloud.StaticNodePoolConfig{
+				MachineType: "ct5p-hightpu-4t",
+				NodeCount:   4,
+				Lifecycle:   cloud.StaticNodePoolLifecycleConfig{},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseNodepoolConfig(tt.yamlData)
+			if err != nil {
+				t.Fatalf("parseNodepoolConfig() unexpected error = %v", err)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("parseNodepoolConfig() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
