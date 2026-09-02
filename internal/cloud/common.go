@@ -24,6 +24,7 @@ const (
 	LabelJobSetNamespace = keyPrefix + "tpu-provisioner-jobset-namespace"
 
 	LabelNodePoolHash = keyPrefix + "tpu-provisioner-nodepool-hash"
+	LabelTopology     = "topology"
 
 	LabelProvisionerNodepoolID        = "provisioner-nodepool-id"
 	LabelTPUProvisionerStaticNodepool = "tpu-provisioner-static-nodepool"
@@ -52,15 +53,15 @@ type StaticNodePoolLifecycleConfig struct {
 }
 
 type StaticNodePoolConfig struct {
-	MachineType                 string                         `yaml:"machineType"`
-	Accelerator                 string                         `yaml:"accelerator"`
-	Topology                    string                         `yaml:"topology"`
-	NodeCount                   int                            `yaml:"nodeCount"`
-	NodeLabels                  map[string]string              `yaml:"nodeLabels"`
-	ShieldedIntegrityMonitoring *bool                          `yaml:"shieldedIntegrityMonitoring"`
-	ShieldedSecureBoot          *bool                          `yaml:"shieldedSecureBoot"`
-	MaxPodsPerNode              int64                          `yaml:"maxPodsPerNode"`
-	EnableAutoRepair            *bool                          `yaml:"enableAutorepair"`
+	MachineType                 string                        `yaml:"machineType"`
+	Accelerator                 string                        `yaml:"accelerator"`
+	Topology                    string                        `yaml:"topology"`
+	NodeCount                   int                           `yaml:"nodeCount"`
+	NodeLabels                  map[string]string             `yaml:"nodeLabels"`
+	ShieldedIntegrityMonitoring *bool                         `yaml:"shieldedIntegrityMonitoring"`
+	ShieldedSecureBoot          *bool                         `yaml:"shieldedSecureBoot"`
+	MaxPodsPerNode              int64                         `yaml:"maxPodsPerNode"`
+	EnableAutoRepair            *bool                         `yaml:"enableAutorepair"`
 	PlacementPolicy             string                        `yaml:"placementPolicy"`
 	Lifecycle                   StaticNodePoolLifecycleConfig `yaml:"lifecycle"`
 }

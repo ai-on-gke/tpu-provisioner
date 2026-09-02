@@ -391,6 +391,7 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 	if !ok {
 		return nil, fmt.Errorf("missing node selector key: %v", GKETPUNodeSelector)
 	}
+	labels[LabelTopology] = tpuTopo
 	accel, ok := p.Spec.NodeSelector[GKEAcceleratorNodeSelector]
 	if !ok {
 		return nil, fmt.Errorf("missing node selector key: %v", GKEAcceleratorNodeSelector)
@@ -874,6 +875,7 @@ func (g *GKE) StaticNodePoolForSubBlock(nodePoolID, subblockToConsume string, co
 		LabelNodepoolManager:              LabelNodepoolManagerTPUPodinator,
 		LabelProvisionerNodepoolID:        nodePoolID,
 		LabelTPUProvisionerStaticNodepool: "true",
+		LabelTopology:                     config.Topology,
 	}
 	for k, v := range config.NodeLabels {
 		labels[k] = v
