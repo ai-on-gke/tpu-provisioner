@@ -639,3 +639,110 @@ func sliceCompareOptions() []cmp.Option {
 		}),
 	}
 }
+
+func TestIsSliceReady(t *testing.T) {
+	tests := []struct {
+		name       string
+		conditions []metav1.Condition
+		want       bool
+	}{
+		{
+			name:       "empty conditions",
+			conditions: nil,
+			want:       false,
+		},
+		{
+			name: "ready true",
+			conditions: []metav1.Condition{
+				{
+					Type:   v1beta1.SliceStateConditionType,
+					Status: metav1.ConditionTrue,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "ready false with FailedToProvision",
+			conditions: []metav1.Condition{
+				{
+					Type:   v1beta1.SliceStateConditionType,
+					Status: metav1.ConditionFalse,
+					Reason: "FailedToProvision",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "ready unknown with ACTIVE reason",
+			conditions: []metav1.Condition{
+				{
+					Type:    v1beta1.SliceStateConditionType,
+					Status:  metav1.ConditionUnknown,
+					Reason:  "ACTIVE",
+					Message: "Unexpected partition state",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "ready unknown with other reason (e.g. ProvisioningTimeout)",
+			conditions: []metav1.Condition{
+				{
+					Type:   v1beta1.SliceStateConditionType,
+					Status: metav1.ConditionUnknown,
+					Reason: "ProvisioningTimeout",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "ready unknown with Creating reason",
+			conditions: []metav1.Condition{
+				{
+					Type:   v1beta1.SliceStateConditionType,
+					Status: metav1.ConditionUnknown,
+					Reason: "Creating",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "unrelated condition unknown, ready condition not present",
+			conditions: []metav1.Condition{
+				{
+					Type:   "SomeOtherCondition",
+					Status: metav1.ConditionUnknown,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "ready false with another unrelated condition unknown",
+			conditions: []metav1.Condition{
+				{
+					Type:   v1beta1.SliceStateConditionType,
+					Status: metav1.ConditionFalse,
+					Reason: "FailedToProvision",
+				},
+				{
+					Type:   "SomeOtherCondition",
+					Status: metav1.ConditionUnknown,
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &v1beta1.Slice{
+				Status: v1beta1.SliceStatus{
+					Conditions: tt.conditions,
+				},
+			}
+			if got := isSliceReady(s); got != tt.want {
+				t.Errorf("isSliceReady() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
