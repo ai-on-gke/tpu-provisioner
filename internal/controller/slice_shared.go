@@ -35,6 +35,10 @@ const SliceCleanupFinalizer = "tpu-provisioner.cloud.google.com/slice-cleanup"
 const SliceSelectionAnnotation = "tpu-provisioner.cloud.google.com/slice-selection"
 const slicePartitionIdsField = "spec.partitionIds"
 
+// SliceReadyReasonActive is the Reason reported on a Slice's Ready condition when the
+// underlying slice is active.
+const SliceReadyReasonActive = "ACTIVE"
+
 // SetupSliceFieldIndexer registers the index for PartitionIds to allow quick lookup of slices by partition.
 func SetupSliceFieldIndexer(mgr ctrl.Manager) error {
 	return mgr.GetFieldIndexer().IndexField(context.Background(), &v1beta1.Slice{}, slicePartitionIdsField, func(rawObj client.Object) []string {
@@ -156,9 +160,11 @@ func ParseRecreateConditions(raw []string) []RecreateCondition {
 	return result
 }
 
-// allSlicesReady checks if all desired Slices exist and have the Ready condition set to true.
+// allSlicesReady checks if all desired Slices exist and are considered ready by isSliceReady
+// (Ready condition set to true, or, if treatUnknownActiveAsReady is enabled, Ready condition
+// Unknown with Reason ACTIVE).
 // legacyNames maps new desired names to their legacy equivalents for backwards compatibility.
-func allSlicesReady(desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice, legacyNames map[string]string) bool {
+func allSlicesReady(desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice, legacyNames map[string]string, treatUnknownActiveAsReady bool) bool {
 	if len(desiredSlices) == 0 {
 		return true
 	}
@@ -176,7 +182,7 @@ func allSlicesReady(desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slic
 			// Slice doesn't exist yet
 			return false
 		}
-		if !isSliceReady(existing) {
+		if !isSliceReady(existing, treatUnknownActiveAsReady) {
 			// Slice exists but is not Ready
 			return false
 		}
@@ -185,18 +191,21 @@ func allSlicesReady(desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slic
 	return true
 }
 
-// isSliceReady checks if a Slice has the Ready condition set to true,
-// or is in an Unknown state with Reason ACTIVE (transient health check).
-func isSliceReady(slice *v1beta1.Slice) bool {
+// isSliceReady checks if a Slice has the Ready condition set to true.
+// If treatUnknownActiveAsReady is enabled, a Slice whose Ready condition is Unknown
+// with Reason ACTIVE is also considered ready.
+func isSliceReady(slice *v1beta1.Slice, treatUnknownActiveAsReady bool) bool {
 	for _, condition := range slice.Status.Conditions {
 		if condition.Type == v1beta1.SliceStateConditionType {
 			if condition.Status == metav1.ConditionTrue {
 				return true
 			}
-			// Slices with Status Unknown and Reason ACTIVE are running and healthy,
-			// but temporarily reported as Unknown due to transient GCE health check glitches.
-			// Treat them as ready to prevent unwanted JobSet suspension.
-			if condition.Status == metav1.ConditionUnknown && condition.Reason == "ACTIVE" {
+			// Slices with Status Unknown and Reason ACTIVE are typically running and healthy,
+			// but temporarily reported as Unknown due to transient GCE health check failures.
+			// When enabled, treat them as ready to prevent unwanted JobSet suspension.
+			if treatUnknownActiveAsReady &&
+				condition.Status == metav1.ConditionUnknown &&
+				condition.Reason == SliceReadyReasonActive {
 				return true
 			}
 		}
@@ -204,11 +213,11 @@ func isSliceReady(slice *v1beta1.Slice) bool {
 	return false
 }
 
-// countReadySlices returns the number of Slices that have the Ready condition set to true.
-func countReadySlices(slices []v1beta1.Slice) int {
+// countReadySlices returns the number of Slices that are considered ready by isSliceReady.
+func countReadySlices(slices []v1beta1.Slice, treatUnknownActiveAsReady bool) int {
 	count := 0
 	for i := range slices {
-		if isSliceReady(&slices[i]) {
+		if isSliceReady(&slices[i], treatUnknownActiveAsReady) {
 			count++
 		}
 	}

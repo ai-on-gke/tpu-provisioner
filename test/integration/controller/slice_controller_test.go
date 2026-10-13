@@ -780,6 +780,111 @@ var _ = Describe("Slice controller", func() {
 		Expect(finalList.Items[0].UID).To(Equal(legacyUID))
 		Expect(finalList.Items[0].Name).To(Equal(legacyName))
 	})
+
+	It("should not suspend JobSet or recreate Slice in sync mode when Slice readiness becomes Unknown with ACTIVE reason", func() {
+		ctx := context.Background()
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-ns-unknown-active-",
+			},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		defer func() {
+			Expect(deleteNamespace(ctx, k8sClient, ns)).To(Succeed())
+		}()
+
+		js := constructJobSet("test-js-unknown-active",
+			withLabel(utils.SliceProvisioningLabel, utils.SliceProvisioningModeSync),
+			withAnnotation(controller.SliceSelectionAnnotation, `{"worker":[["test-js-unknown-active-worker-0"]]}`),
+			withReplicatedJob("worker", 1, makeJobTemplateWithTPU("tpu7x", "4x4x4")),
+		)
+		js.Namespace = ns.Name
+
+		By("Creating JobSet with sync mode")
+		Expect(k8sClient.Create(ctx, js)).To(Succeed())
+
+		sliceLabels := client.MatchingLabels{
+			controller.SliceOwnerKindLabel:      "jobset",
+			controller.SliceOwnerNameLabel:      js.Name,
+			controller.SliceOwnerNamespaceLabel: js.Namespace,
+		}
+
+		By("Waiting for the Slice to be created")
+		var sliceList v1beta1.SliceList
+		Eventually(func() int {
+			if err := k8sClient.List(ctx, &sliceList, sliceLabels); err != nil {
+				return 0
+			}
+			return len(sliceList.Items)
+		}, timeout, interval).Should(Equal(1))
+
+		By("Verifying JobSet is suspended because the Slice is not Ready")
+		Eventually(func() bool {
+			var updatedJS jobset.JobSet
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(js), &updatedJS); err != nil {
+				return false
+			}
+			return updatedJS.Spec.Suspend != nil && *updatedJS.Spec.Suspend
+		}, timeout, interval).Should(BeTrue())
+
+		By("Marking the Slice as Ready")
+		slice := sliceList.Items[0]
+		initialUID := slice.UID
+		slice.Status.Conditions = []metav1.Condition{
+			{
+				Type:               v1beta1.SliceStateConditionType,
+				Status:             metav1.ConditionTrue,
+				Reason:             "Ready",
+				Message:            "Slice is ready",
+				LastTransitionTime: metav1.Now(),
+			},
+		}
+		Expect(k8sClient.Status().Update(ctx, &slice)).To(Succeed())
+
+		By("Verifying JobSet is unsuspended after the Slice is Ready")
+		Eventually(func() bool {
+			var updatedJS jobset.JobSet
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(js), &updatedJS); err != nil {
+				return false
+			}
+			return updatedJS.Spec.Suspend != nil && !*updatedJS.Spec.Suspend
+		}, timeout, interval).Should(BeTrue())
+
+		By("Transitioning the Slice Ready condition to Unknown with Reason ACTIVE")
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)).To(Succeed())
+		slice.Status.Conditions = []metav1.Condition{
+			{
+				Type:               v1beta1.SliceStateConditionType,
+				Status:             metav1.ConditionUnknown,
+				Reason:             controller.SliceReadyReasonActive,
+				Message:            "Unexpected partition state",
+				LastTransitionTime: metav1.Now(),
+			},
+		}
+		Expect(k8sClient.Status().Update(ctx, &slice)).To(Succeed())
+
+		By("Verifying JobSet remains unsuspended")
+		Consistently(func() bool {
+			var updatedJS jobset.JobSet
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(js), &updatedJS); err != nil {
+				return false
+			}
+			return updatedJS.Spec.Suspend == nil || !*updatedJS.Spec.Suspend
+		}, 5*time.Second, interval).Should(BeTrue())
+
+		By("Verifying the Slice is not recreated (same UID)")
+		Consistently(func() []types.UID {
+			var list v1beta1.SliceList
+			if err := k8sClient.List(ctx, &list, sliceLabels); err != nil {
+				return nil
+			}
+			var uids []types.UID
+			for _, s := range list.Items {
+				uids = append(uids, s.UID)
+			}
+			return uids
+		}, 5*time.Second, interval).Should(ConsistOf(initialUID))
+	})
 })
 
 // JobSetOption is a function that modifies a JobSet.

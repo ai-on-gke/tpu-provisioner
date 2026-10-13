@@ -639,17 +639,20 @@ func sliceCompareOptions() []cmp.Option {
 		}),
 	}
 }
-
 func TestIsSliceReady(t *testing.T) {
 	tests := []struct {
 		name       string
 		conditions []metav1.Condition
-		want       bool
+		// want is the expected result when treatUnknownActiveAsReady is disabled (default).
+		want bool
+		// wantTreatUnknownActive is the expected result when treatUnknownActiveAsReady is enabled.
+		wantTreatUnknownActive bool
 	}{
 		{
-			name:       "empty conditions",
-			conditions: nil,
-			want:       false,
+			name:                   "empty conditions",
+			conditions:             nil,
+			want:                   false,
+			wantTreatUnknownActive: false,
 		},
 		{
 			name: "ready true",
@@ -659,7 +662,8 @@ func TestIsSliceReady(t *testing.T) {
 					Status: metav1.ConditionTrue,
 				},
 			},
-			want: true,
+			want:                   true,
+			wantTreatUnknownActive: true,
 		},
 		{
 			name: "ready false with FailedToProvision",
@@ -670,7 +674,20 @@ func TestIsSliceReady(t *testing.T) {
 					Reason: "FailedToProvision",
 				},
 			},
-			want: false,
+			want:                   false,
+			wantTreatUnknownActive: false,
+		},
+		{
+			name: "ready false with ACTIVE reason",
+			conditions: []metav1.Condition{
+				{
+					Type:   v1beta1.SliceStateConditionType,
+					Status: metav1.ConditionFalse,
+					Reason: SliceReadyReasonActive,
+				},
+			},
+			want:                   false,
+			wantTreatUnknownActive: false,
 		},
 		{
 			name: "ready unknown with ACTIVE reason",
@@ -678,11 +695,12 @@ func TestIsSliceReady(t *testing.T) {
 				{
 					Type:    v1beta1.SliceStateConditionType,
 					Status:  metav1.ConditionUnknown,
-					Reason:  "ACTIVE",
+					Reason:  SliceReadyReasonActive,
 					Message: "Unexpected partition state",
 				},
 			},
-			want: true,
+			want:                   false,
+			wantTreatUnknownActive: true,
 		},
 		{
 			name: "ready unknown with other reason (e.g. ProvisioningTimeout)",
@@ -693,7 +711,8 @@ func TestIsSliceReady(t *testing.T) {
 					Reason: "ProvisioningTimeout",
 				},
 			},
-			want: false,
+			want:                   false,
+			wantTreatUnknownActive: false,
 		},
 		{
 			name: "ready unknown with Creating reason",
@@ -704,17 +723,20 @@ func TestIsSliceReady(t *testing.T) {
 					Reason: "Creating",
 				},
 			},
-			want: false,
+			want:                   false,
+			wantTreatUnknownActive: false,
 		},
 		{
-			name: "unrelated condition unknown, ready condition not present",
+			name: "unrelated condition unknown with ACTIVE reason, ready condition not present",
 			conditions: []metav1.Condition{
 				{
 					Type:   "SomeOtherCondition",
 					Status: metav1.ConditionUnknown,
+					Reason: SliceReadyReasonActive,
 				},
 			},
-			want: false,
+			want:                   false,
+			wantTreatUnknownActive: false,
 		},
 		{
 			name: "ready false with another unrelated condition unknown",
@@ -729,7 +751,8 @@ func TestIsSliceReady(t *testing.T) {
 					Status: metav1.ConditionUnknown,
 				},
 			},
-			want: false,
+			want:                   false,
+			wantTreatUnknownActive: false,
 		},
 	}
 
@@ -740,8 +763,11 @@ func TestIsSliceReady(t *testing.T) {
 					Conditions: tt.conditions,
 				},
 			}
-			if got := isSliceReady(s); got != tt.want {
-				t.Errorf("isSliceReady() = %v, want %v", got, tt.want)
+			if got := isSliceReady(s, false); got != tt.want {
+				t.Errorf("isSliceReady(treatUnknownActiveAsReady=false) = %v, want %v", got, tt.want)
+			}
+			if got := isSliceReady(s, true); got != tt.wantTreatUnknownActive {
+				t.Errorf("isSliceReady(treatUnknownActiveAsReady=true) = %v, want %v", got, tt.wantTreatUnknownActive)
 			}
 		})
 	}

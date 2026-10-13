@@ -30,6 +30,10 @@ type JobSetSliceReconciler struct {
 	Scheme                  *runtime.Scheme
 	RecreateConditions      []RecreateCondition
 	ConditionalRecreateWait time.Duration
+	// TreatUnknownActiveSliceAsReady, when enabled, treats a Slice whose Ready condition
+	// is Unknown with Reason ACTIVE as ready. This prevents JobSets in sync mode from being
+	// suspended when the Slice readiness status is temporarily Unknown.
+	TreatUnknownActiveSliceAsReady bool
 }
 
 func (r *JobSetSliceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -260,7 +264,7 @@ func jobsetSlices(js *jobset.JobSet) ([]v1beta1.Slice, map[string]string, error)
 func (r *JobSetSliceReconciler) handleSyncMode(ctx context.Context, js *jobset.JobSet, desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slice, legacyNames map[string]string) error {
 	log := ctrllog.FromContext(ctx)
 
-	slicesReady := allSlicesReady(desiredSlices, existingSlices, legacyNames)
+	slicesReady := allSlicesReady(desiredSlices, existingSlices, legacyNames, r.TreatUnknownActiveSliceAsReady)
 	jsCurrentlySuspended := js.Spec.Suspend != nil && *js.Spec.Suspend
 
 	if slicesReady && jsCurrentlySuspended {
@@ -277,7 +281,7 @@ func (r *JobSetSliceReconciler) handleSyncMode(ctx context.Context, js *jobset.J
 	} else if !slicesReady && !jsCurrentlySuspended {
 		// Not all slices are ready, suspend the JobSet
 		log.Info("Not all Slices are Ready, suspending JobSet",
-			"readyCount", countReadySlices(existingSlices),
+			"readyCount", countReadySlices(existingSlices, r.TreatUnknownActiveSliceAsReady),
 			"expectedCount", len(desiredSlices))
 		patch := client.MergeFrom(js.DeepCopy())
 		suspendValue := true
