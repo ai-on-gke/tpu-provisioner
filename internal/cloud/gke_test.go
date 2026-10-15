@@ -1572,6 +1572,28 @@ func Test_nodePoolSelectiveHash(t *testing.T) {
 			},
 			expSameHash: false,
 		},
+		{
+			name: "different topology in placement policy",
+			A: &container.NodePool{
+				Config: &container.NodeConfig{
+					MachineType: "ct5p-hightpu-4t",
+				},
+				PlacementPolicy: &container.PlacementPolicy{
+					TpuTopology: "2x2x2",
+					Type:        "COMPACT",
+				},
+			},
+			B: &container.NodePool{
+				Config: &container.NodeConfig{
+					MachineType: "ct5p-hightpu-4t",
+				},
+				PlacementPolicy: &container.PlacementPolicy{
+					TpuTopology: "2x2x4",
+					Type:        "COMPACT",
+				},
+			},
+			expSameHash: false,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1981,4 +2003,3 @@ func TestStaticImageStreamingConfig(t *testing.T) {
 		}
 	})
 }
-

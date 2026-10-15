@@ -1062,6 +1062,7 @@ func nodePoolHash(np *containerv1beta1.NodePool) (string, error) {
 				MachineType:         np.Config.MachineType,
 				ReservationAffinity: np.Config.ReservationAffinity,
 			},
+			PlacementPolicy: np.PlacementPolicy,
 		}
 		dataToHash = npToHash
 	}
