@@ -643,6 +643,8 @@ func TestIsSliceReady(t *testing.T) {
 	tests := []struct {
 		name       string
 		conditions []metav1.Condition
+		// deleting sets a deletion timestamp on the Slice.
+		deleting bool
 		// want is the expected result when treatUnknownActiveAsReady is disabled (default).
 		want bool
 		// wantTreatUnknownActive is the expected result when treatUnknownActiveAsReady is enabled.
@@ -700,6 +702,32 @@ func TestIsSliceReady(t *testing.T) {
 				},
 			},
 			want:                   false,
+			wantTreatUnknownActive: true,
+		},
+		{
+			name:     "ready unknown with ACTIVE reason, slice being deleted",
+			deleting: true,
+			conditions: []metav1.Condition{
+				{
+					Type:    v1beta1.SliceStateConditionType,
+					Status:  metav1.ConditionUnknown,
+					Reason:  SliceReadyReasonActive,
+					Message: "Unexpected partition state",
+				},
+			},
+			want:                   false,
+			wantTreatUnknownActive: false,
+		},
+		{
+			name:     "ready true, slice being deleted (default behavior unchanged)",
+			deleting: true,
+			conditions: []metav1.Condition{
+				{
+					Type:   v1beta1.SliceStateConditionType,
+					Status: metav1.ConditionTrue,
+				},
+			},
+			want:                   true,
 			wantTreatUnknownActive: true,
 		},
 		{
@@ -762,6 +790,10 @@ func TestIsSliceReady(t *testing.T) {
 				Status: v1beta1.SliceStatus{
 					Conditions: tt.conditions,
 				},
+			}
+			if tt.deleting {
+				now := metav1.Now()
+				s.DeletionTimestamp = &now
 			}
 			if got := isSliceReady(s, false); got != tt.want {
 				t.Errorf("isSliceReady(treatUnknownActiveAsReady=false) = %v, want %v", got, tt.want)

@@ -193,7 +193,7 @@ func allSlicesReady(desiredSlices []v1beta1.Slice, existingSlices []v1beta1.Slic
 
 // isSliceReady checks if a Slice has the Ready condition set to true.
 // If treatUnknownActiveAsReady is enabled, a Slice whose Ready condition is Unknown
-// with Reason ACTIVE is also considered ready.
+// with Reason ACTIVE is also considered ready, unless the Slice is being deleted.
 func isSliceReady(slice *v1beta1.Slice, treatUnknownActiveAsReady bool) bool {
 	for _, condition := range slice.Status.Conditions {
 		if condition.Type == v1beta1.SliceStateConditionType {
@@ -203,7 +203,9 @@ func isSliceReady(slice *v1beta1.Slice, treatUnknownActiveAsReady bool) bool {
 			// Slices with Status Unknown and Reason ACTIVE are typically running and healthy,
 			// but temporarily reported as Unknown due to transient GCE health check failures.
 			// When enabled, treat them as ready to prevent unwanted JobSet suspension.
+			// A Slice that is being deleted is never treated as ready via this path.
 			if treatUnknownActiveAsReady &&
+				slice.DeletionTimestamp == nil &&
 				condition.Status == metav1.ConditionUnknown &&
 				condition.Reason == SliceReadyReasonActive {
 				return true

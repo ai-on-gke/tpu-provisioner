@@ -53,8 +53,11 @@ var (
 	testEnv                  *envtest.Environment
 	provider                 *mockProvider
 	staticNodepoolReconciler *controller.StaticNodepoolReconciler
-	ctx                      context.Context
-	cancel                   context.CancelFunc
+	// jobSetSliceReconciler is shared so that individual Serial specs can toggle its
+	// settings (e.g. TreatUnknownActiveSliceAsReady) and restore the defaults afterwards.
+	jobSetSliceReconciler *controller.JobSetSliceReconciler
+	ctx                   context.Context
+	cancel                context.CancelFunc
 )
 
 const (
@@ -149,14 +152,16 @@ var _ = BeforeSuite(func() {
 	err = controller.SetupSliceFieldIndexer(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
-	err = (&controller.JobSetSliceReconciler{
-		Client:                         mgr.GetClient(),
-		Scheme:                         mgr.GetScheme(),
-		Recorder:                       mgr.GetEventRecorderFor("slice-reconciler"),
-		RecreateConditions:             []controller.RecreateCondition{{Reason: "FailedToProvision"}, {Reason: "ProvisioningTimeout"}},
-		ConditionalRecreateWait:        0,
-		TreatUnknownActiveSliceAsReady: true,
-	}).SetupWithManager(mgr)
+	jobSetSliceReconciler = &controller.JobSetSliceReconciler{
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		Recorder:                mgr.GetEventRecorderFor("slice-reconciler"),
+		RecreateConditions:      []controller.RecreateCondition{{Reason: "FailedToProvision"}, {Reason: "ProvisioningTimeout"}},
+		ConditionalRecreateWait: 0,
+		// Matches the production default (SLICE_TREAT_UNKNOWN_ACTIVE_AS_READY unset).
+		TreatUnknownActiveSliceAsReady: false,
+	}
+	err = jobSetSliceReconciler.SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&controller.LeaderWorkerSetSliceReconciler{
