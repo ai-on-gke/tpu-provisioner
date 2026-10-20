@@ -200,47 +200,9 @@ kubectl apply -f ./examples/ironwood-jobset-32.yaml/
 
 In order to support ironwood we need to have Workload Policy's attached to nodepool creation step, in order to work with the tpu-provisioner you will need Workload Policy resources in the project and region with the following syntax: `tpu-provisioner-$TPU_TOPOLOGY`, e.g. `tpu-provisioner-2x2x2` or `tpu-provisioner-8x8x16`. See the script in [./docs/ironwood-policy-bootstrap.sh](./docs/ironwood-policy-bootstrap.sh), which would need to run ahead of time in the project for each region where ironwood capacity is landing.
 
-### Slice Controller: treating Unknown/ACTIVE Slices as ready
+### Slice Controller Configuration
 
-When the Slice controller is enabled (`ENABLE_SLICE_CONTROLLER: "true"`), JobSets using `sync` slice provisioning mode stay suspended until all of their Slices are ready. If a Slice stops being ready while the JobSet is running, the provisioner suspends the JobSet again.
-
-By default, a Slice counts as ready only when its `Ready` condition has status `True`. However, the Slice controller can briefly report an active, healthy Slice as:
-
-```yaml
-type: Ready
-status: Unknown
-reason: ACTIVE
-message: Unexpected partition state
-```
-
-This usually happens when the GCE health checks behind the Slice fail temporarily. With the default behavior, it causes running JobSets to be suspended even though the TPU hardware is fine.
-
-*   `SLICE_TREAT_UNKNOWN_ACTIVE_AS_READY`: (Optional) If `true`, a Slice whose `Ready` condition has status `Unknown` and reason `ACTIVE` counts as ready, so a JobSet in `sync` mode is not suspended when its Slices enter this state. Defaults to `false`.
-    *   This only affects whether the JobSet is suspended. Slices are still recreated only when their condition matches `SLICE_RECREATE_CONDITIONS`.
-    *   Slices with status `Unknown` and any other reason (for example while being created) are still treated as not ready.
-
-To enable it, add the variable to your cluster's ConfigMap patch at `deploy/${GCP_PROJECT_ID}/${GCP_CLUSTER}/configmap-patch.yaml` (see [Deployment directory setup](#deployment-directory-setup)). The controller reads its environment variables from this ConfigMap:
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: manager
-  namespace: tpu-provisioner-system
-data:
-  # ...existing values...
-  ENABLE_SLICE_CONTROLLER: "true"
-  SLICE_TREAT_UNKNOWN_ACTIVE_AS_READY: "true"
-```
-
-Then apply the change and restart the controller so it picks up the new environment variable. Environment variables are only read when the controller starts:
-
-```bash
-kubectl apply --server-side -k ./deploy/${GCP_PROJECT_ID}/${GCP_CLUSTER}
-kubectl rollout restart deployment/tpu-provisioner-controller-manager -n tpu-provisioner-system
-```
-
-To turn it off, remove the line (or set it to `"false"`), then apply and restart again.
+*   `SLICE_TREAT_UNKNOWN_ACTIVE_AS_READY`: (Optional) If `true`, a Slice whose `Ready` condition has status `Unknown` and reason `ACTIVE` (for example, `Unexpected partition state` during transient health check failures) is treated as ready, so JobSets in `sync` provisioning mode are not suspended when their Slices enter this state. Slices that are being deleted are never treated as ready this way. Defaults to `false`.
 
 ### Static Nodepool Provisioner
 
