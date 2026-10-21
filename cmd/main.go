@@ -247,11 +247,12 @@ func main() {
 		}
 		recreateConditions := controller.ParseRecreateConditions(cfg.SliceRecreateConditions)
 		if err := (&controller.JobSetSliceReconciler{
-			Client:                  mgr.GetClient(),
-			Scheme:                  mgr.GetScheme(),
-			Recorder:                mgr.GetEventRecorderFor("tpu-provisioner"),
-			RecreateConditions:      recreateConditions,
-			ConditionalRecreateWait: cfg.SliceConditionalRecreateWait,
+			Client:                         mgr.GetClient(),
+			Scheme:                         mgr.GetScheme(),
+			Recorder:                       mgr.GetEventRecorderFor("tpu-provisioner"),
+			RecreateConditions:             recreateConditions,
+			ConditionalRecreateWait:        cfg.SliceConditionalRecreateWait,
+			TreatUnknownActiveSliceAsReady: cfg.SliceTreatUnknownActiveAsReady,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "SliceReconciler")
 			os.Exit(1)

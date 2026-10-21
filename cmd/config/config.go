@@ -74,6 +74,11 @@ type Config struct {
 
 	SliceRecreateConditions      []string      `envconfig:"SLICE_RECREATE_CONDITIONS"`
 	SliceConditionalRecreateWait time.Duration `envconfig:"SLICE_CONDITIONAL_RECREATE_WAIT" default:"60s"`
+
+	// SliceTreatUnknownActiveAsReady treats a Slice whose Ready condition is Unknown with
+	// Reason ACTIVE as ready. This prevents JobSets in sync mode from being suspended when
+	// Slice readiness is temporarily Unknown.
+	SliceTreatUnknownActiveAsReady bool `envconfig:"SLICE_TREAT_UNKNOWN_ACTIVE_AS_READY" default:"false"`
 }
 
 func ParseEnv() (Config, error) {

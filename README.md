@@ -200,6 +200,10 @@ kubectl apply -f ./examples/ironwood-jobset-32.yaml/
 
 In order to support ironwood we need to have Workload Policy's attached to nodepool creation step, in order to work with the tpu-provisioner you will need Workload Policy resources in the project and region with the following syntax: `tpu-provisioner-$TPU_TOPOLOGY`, e.g. `tpu-provisioner-2x2x2` or `tpu-provisioner-8x8x16`. See the script in [./docs/ironwood-policy-bootstrap.sh](./docs/ironwood-policy-bootstrap.sh), which would need to run ahead of time in the project for each region where ironwood capacity is landing.
 
+### Slice Controller Configuration
+
+*   `SLICE_TREAT_UNKNOWN_ACTIVE_AS_READY`: (Optional) If `true`, a Slice whose `Ready` condition has status `Unknown` and reason `ACTIVE` (for example, `Unexpected partition state` during transient health check failures) is treated as ready, so JobSets in `sync` provisioning mode are not suspended when their Slices enter this state. Slices that are being deleted are never treated as ready this way. Defaults to `false`.
+
 ### Static Nodepool Provisioner
 
 In addition to dynamic nodepool creation, the TPU provisioner also supports pre-provisioning nodepools based on a static configuration. This functionality is designed to be used with gSC reservations and superslicing.
