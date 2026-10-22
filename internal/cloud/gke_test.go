@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -269,12 +271,17 @@ func (r *mockEventRecorder) AnnotatedEventf(object runtime.Object, annotations m
 }
 
 type mockGKEService struct {
-	creates   map[string]int
-	deletes   map[string]int
-	nodePools map[string]*container.NodePool
+	mu         sync.Mutex
+	creates    map[string]int
+	deletes    map[string]int
+	nodePools  map[string]*container.NodePool
+	deleteHook func(ctx context.Context, name string) error
+	createHook func(ctx context.Context, req *container.CreateNodePoolRequest) error
 }
 
 func (g *mockGKEService) Get(ctx context.Context, name string) (*container.NodePool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	np, ok := g.nodePools[name]
 	if !ok {
 		return nil, &googleapi.Error{
@@ -285,6 +292,8 @@ func (g *mockGKEService) Get(ctx context.Context, name string) (*container.NodeP
 }
 
 func (g *mockGKEService) List(ctx context.Context) (*container.ListNodePoolsResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	var resp container.ListNodePoolsResponse
 	for _, np := range g.nodePools {
 		resp.NodePools = append(resp.NodePools, np)
@@ -293,26 +302,65 @@ func (g *mockGKEService) List(ctx context.Context) (*container.ListNodePoolsResp
 }
 
 func (g *mockGKEService) Create(ctx context.Context, req *container.CreateNodePoolRequest, callbacks OpCallbacks) error {
+	if g.createHook != nil {
+		if err := g.createHook(ctx, req); err != nil {
+			if callbacks.ReqFailure != nil {
+				callbacks.ReqFailure(err)
+			}
+			return err
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	_, alreadyExists := g.nodePools[req.NodePool.Name]
 	if alreadyExists {
 		return &googleapi.Error{
 			Code: http.StatusConflict,
 		}
 	}
+	if req.NodePool.Config != nil && req.NodePool.Config.ReservationAffinity != nil && len(req.NodePool.Config.ReservationAffinity.Values) > 0 {
+		targetSubblock := req.NodePool.Config.ReservationAffinity.Values[0]
+		for existingName, existingNP := range g.nodePools {
+			if existingNP.Config != nil && existingNP.Config.ReservationAffinity != nil && len(existingNP.Config.ReservationAffinity.Values) > 0 {
+				if existingNP.Config.ReservationAffinity.Values[0] == targetSubblock {
+					return fmt.Errorf("subblock %s already in use by nodepool %s", targetSubblock, existingName)
+				}
+			}
+		}
+	}
 	g.nodePools[req.NodePool.Name] = req.NodePool
 	g.creates[req.NodePool.Name]++
+	if callbacks.Success != nil {
+		callbacks.Success()
+	}
 	return nil
 }
 
 func (g *mockGKEService) Delete(ctx context.Context, name string, callbacks OpCallbacks) error {
+	if g.deleteHook != nil {
+		if err := g.deleteHook(ctx, name); err != nil {
+			if callbacks.ReqFailure != nil {
+				callbacks.ReqFailure(err)
+			}
+			return err
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	_, ok := g.nodePools[name]
 	if !ok {
+		if callbacks.NotFound != nil {
+			callbacks.NotFound()
+		}
 		return &googleapi.Error{
 			Code: http.StatusNotFound,
 		}
 	}
 	delete(g.nodePools, name)
 	g.deletes[name]++
+	if callbacks.Success != nil {
+		callbacks.Success()
+	}
 	return nil
 }
 
@@ -1982,3 +2030,345 @@ func TestStaticImageStreamingConfig(t *testing.T) {
 	})
 }
 
+func TestSyncStaticNodePools(t *testing.T) {
+	staticConfig := &StaticNodePoolConfig{
+		MachineType: "tpu7x-standard-4t",
+		Accelerator: V7xSliceAccelerator,
+		Topology:    "4x4x4",
+		NodeCount:   16,
+	}
+
+	subblockPath := func(idx int) string {
+		return fmt.Sprintf("projects/test-project/reservations/res-1/reservationBlocks/block-1/reservationSubBlocks/block-1-subblock-%04d", idx)
+	}
+
+	seedNodePool := func(t *testing.T, gke *GKE, svc *mockGKEService, name, subblock string) {
+		t.Helper()
+		np, err := gke.StaticNodePoolForSubBlock(name, subblock, staticConfig)
+		if err != nil {
+			t.Fatalf("StaticNodePoolForSubBlock(%s): %v", name, err)
+		}
+		svc.mu.Lock()
+		svc.nodePools[name] = np
+		svc.mu.Unlock()
+	}
+
+	t.Run("failed deletion skips conflicting subblock and name creations but allows non-conflicting creations", func(t *testing.T) {
+		gke, svc := newTestGKE(t)
+		ctx := context.Background()
+
+		// Seed 3 existing nodepools:
+		// - np-fail-same-name on subblock 1 (recreate fails to delete)
+		// - old-np-fail-subblock on subblock 2 (rename fails to delete)
+		// - old-np-ok-subblock on subblock 3 (rename succeeds in deleting)
+		seedNodePool(t, gke, svc, "np-fail-same-name", subblockPath(1))
+		seedNodePool(t, gke, svc, "old-np-fail-subblock", subblockPath(2))
+		seedNodePool(t, gke, svc, "old-np-ok-subblock", subblockPath(3))
+
+		svc.deleteHook = func(ctx context.Context, name string) error {
+			if name == "np-fail-same-name" || name == "old-np-fail-subblock" {
+				return errors.New("simulated GKE delete failure")
+			}
+			return nil
+		}
+
+		toDelete := []StaticNodePoolDelete{
+			{Name: "np-fail-same-name", SubblockName: subblockPath(1), Reason: "static nodepool in error state"},
+			{Name: "old-np-fail-subblock", SubblockName: subblockPath(2), Reason: "static nodepool not in config"},
+			{Name: "old-np-ok-subblock", SubblockName: subblockPath(3), Reason: "static nodepool not in config"},
+		}
+		toCreate := []*DesiredStaticNodePool{
+			// Blocked by failed delete of same name/subblock 1
+			{Name: "np-fail-same-name", SubblockToConsume: subblockPath(1), Config: staticConfig},
+			// Blocked by failed delete of old-np-fail-subblock on subblock 2
+			{Name: "new-np-fail-subblock", SubblockToConsume: subblockPath(2), Config: staticConfig},
+			// Unblocked after old-np-ok-subblock on subblock 3 is successfully deleted
+			{Name: "new-np-ok-subblock", SubblockToConsume: subblockPath(3), Config: staticConfig},
+			// Completely independent subblock 4 (no prior deletion needed)
+			{Name: "np-brand-new", SubblockToConsume: subblockPath(4), Config: staticConfig},
+		}
+
+		err := gke.SyncStaticNodePools(ctx, toDelete, toCreate, 2, 2, 10*time.Second, nil)
+		if err == nil {
+			t.Fatalf("expected error from failed deletions, got nil")
+		}
+
+		// Verify conflicting creates were NOT attempted
+		if got := svc.creates["np-fail-same-name"]; got != 0 {
+			t.Errorf("expected 0 creates for np-fail-same-name, got %d", got)
+		}
+		if got := svc.creates["new-np-fail-subblock"]; got != 0 {
+			t.Errorf("expected 0 creates for new-np-fail-subblock, got %d", got)
+		}
+
+		// Verify non-conflicting creates and creates whose deletes succeeded DID succeed
+		if got := svc.creates["new-np-ok-subblock"]; got != 1 {
+			t.Errorf("expected 1 create for new-np-ok-subblock, got %d", got)
+		}
+		if got := svc.creates["np-brand-new"]; got != 1 {
+			t.Errorf("expected 1 create for np-brand-new, got %d", got)
+		}
+	})
+
+	t.Run("unblocked creations proceed in parallel without waiting for slow deletions, while conflicting creation waits", func(t *testing.T) {
+		gke, svc := newTestGKE(t)
+		ctx := context.Background()
+
+		seedNodePool(t, gke, svc, "slow-delete-np", subblockPath(1))
+
+		deleteStarted := make(chan struct{})
+		releaseDelete := make(chan struct{})
+		unblockedCreated := make(chan struct{})
+
+		svc.deleteHook = func(ctx context.Context, name string) error {
+			if name == "slow-delete-np" {
+				close(deleteStarted)
+				<-releaseDelete
+			}
+			return nil
+		}
+
+		svc.createHook = func(ctx context.Context, req *container.CreateNodePoolRequest) error {
+			if req.NodePool.Name == "independent-np" {
+				close(unblockedCreated)
+			}
+			return nil
+		}
+
+		toDelete := []StaticNodePoolDelete{
+			{Name: "slow-delete-np", SubblockName: subblockPath(1), Reason: "static nodepool not in config"},
+		}
+		toCreate := []*DesiredStaticNodePool{
+			// Shares subblock 1 with slow-delete-np; must wait until releaseDelete is closed
+			{Name: "replacement-np", SubblockToConsume: subblockPath(1), Config: staticConfig},
+			// Uses subblock 2; must NOT wait for slow-delete-np
+			{Name: "independent-np", SubblockToConsume: subblockPath(2), Config: staticConfig},
+		}
+
+		syncDone := make(chan error, 1)
+		go func() {
+			syncDone <- gke.SyncStaticNodePools(ctx, toDelete, toCreate, 2, 2, 10*time.Second, nil)
+		}()
+
+		// Wait for both the slow delete to start and the independent create to complete while delete is still blocked
+		select {
+		case <-deleteStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for slow-delete-np deletion to start")
+		}
+
+		select {
+		case <-unblockedCreated:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for independent-np creation to run in parallel with blocked delete")
+		}
+
+		// While slow-delete-np is still blocked, replacement-np must NOT have been created yet
+		svc.mu.Lock()
+		replacementCreatesWhileBlocked := svc.creates["replacement-np"]
+		svc.mu.Unlock()
+		if replacementCreatesWhileBlocked != 0 {
+			t.Fatalf("expected replacement-np not to be created before slow-delete-np finished deleting, got %d creates", replacementCreatesWhileBlocked)
+		}
+
+		// Now unblock the deletion of slow-delete-np; replacement-np should subsequently be created
+		close(releaseDelete)
+
+		select {
+		case err := <-syncDone:
+			if err != nil {
+				t.Fatalf("SyncStaticNodePools() unexpected error: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for SyncStaticNodePools to complete")
+		}
+
+		if got := svc.creates["replacement-np"]; got != 1 {
+			t.Errorf("expected 1 create for replacement-np after delete completed, got %d", got)
+		}
+		if got := svc.creates["independent-np"]; got != 1 {
+			t.Errorf("expected 1 create for independent-np, got %d", got)
+		}
+	})
+
+	t.Run("create semaphore is not starved by creations waiting on pending deletions", func(t *testing.T) {
+		gke, svc := newTestGKE(t)
+		ctx := context.Background()
+
+		seedNodePool(t, gke, svc, "blocked-del-1", subblockPath(1))
+		seedNodePool(t, gke, svc, "blocked-del-2", subblockPath(2))
+
+		releaseDeletes := make(chan struct{})
+		unblockedCreated := make(chan struct{})
+
+		svc.deleteHook = func(ctx context.Context, name string) error {
+			<-releaseDeletes
+			return nil
+		}
+
+		svc.createHook = func(ctx context.Context, req *container.CreateNodePoolRequest) error {
+			if req.NodePool.Name == "unblocked-np-3" {
+				close(unblockedCreated)
+			}
+			return nil
+		}
+
+		toDelete := []StaticNodePoolDelete{
+			{Name: "blocked-del-1", SubblockName: subblockPath(1), Reason: "static nodepool not in config"},
+			{Name: "blocked-del-2", SubblockName: subblockPath(2), Reason: "static nodepool not in config"},
+		}
+		// With createConcurrency = 1, if blocked-create-1 or blocked-create-2 acquired createSem
+		// before waiting on their delete gates, unblocked-np-3 would be starved.
+		toCreate := []*DesiredStaticNodePool{
+			{Name: "blocked-create-1", SubblockToConsume: subblockPath(1), Config: staticConfig},
+			{Name: "blocked-create-2", SubblockToConsume: subblockPath(2), Config: staticConfig},
+			{Name: "unblocked-np-3", SubblockToConsume: subblockPath(3), Config: staticConfig},
+		}
+
+		syncDone := make(chan error, 1)
+		go func() {
+			syncDone <- gke.SyncStaticNodePools(ctx, toDelete, toCreate, 2, 1, 10*time.Second, nil)
+		}()
+
+		select {
+		case <-unblockedCreated:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out: unblocked-np-3 was starved by blocked creations when createConcurrency=1")
+		}
+
+		close(releaseDeletes)
+
+		select {
+		case err := <-syncDone:
+			if err != nil {
+				t.Fatalf("SyncStaticNodePools() unexpected error: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for SyncStaticNodePools to complete")
+		}
+
+		for _, name := range []string{"blocked-create-1", "blocked-create-2", "unblocked-np-3"} {
+			if got := svc.creates[name]; got != 1 {
+				t.Errorf("expected 1 create for %s, got %d", name, got)
+			}
+		}
+	})
+
+	t.Run("multiple delete-then-create chains progress independently per subblock", func(t *testing.T) {
+		gke, svc := newTestGKE(t)
+		ctx := context.Background()
+
+		seedNodePool(t, gke, svc, "pool-a", subblockPath(1))
+		seedNodePool(t, gke, svc, "old-pool-b", subblockPath(2))
+
+		delAStarted := make(chan struct{})
+		delBStarted := make(chan struct{})
+		releaseDelA := make(chan struct{})
+		releaseDelB := make(chan struct{})
+		poolACreated := make(chan struct{})
+
+		svc.deleteHook = func(ctx context.Context, name string) error {
+			switch name {
+			case "pool-a":
+				close(delAStarted)
+				<-releaseDelA
+			case "old-pool-b":
+				close(delBStarted)
+				<-releaseDelB
+			}
+			return nil
+		}
+
+		svc.createHook = func(ctx context.Context, req *container.CreateNodePoolRequest) error {
+			if req.NodePool.Name == "pool-a" {
+				close(poolACreated)
+			}
+			return nil
+		}
+
+		toDelete := []StaticNodePoolDelete{
+			{Name: "pool-a", SubblockName: subblockPath(1), Reason: "static nodepool config changed"},
+			{Name: "old-pool-b", SubblockName: subblockPath(2), Reason: "static nodepool not in config"},
+		}
+		toCreate := []*DesiredStaticNodePool{
+			{Name: "pool-a", SubblockToConsume: subblockPath(1), Config: staticConfig},
+			{Name: "new-pool-b", SubblockToConsume: subblockPath(2), Config: staticConfig},
+		}
+
+		syncDone := make(chan error, 1)
+		go func() {
+			syncDone <- gke.SyncStaticNodePools(ctx, toDelete, toCreate, 2, 2, 10*time.Second, nil)
+		}()
+
+		<-delAStarted
+		<-delBStarted
+
+		// Release only pool-a; pool-a should immediately be recreated while old-pool-b is still deleting
+		close(releaseDelA)
+
+		select {
+		case <-poolACreated:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for pool-a to be recreated after its deletion finished")
+		}
+
+		svc.mu.Lock()
+		createsBWhileBlocked := svc.creates["new-pool-b"]
+		svc.mu.Unlock()
+		if createsBWhileBlocked != 0 {
+			t.Fatalf("expected new-pool-b to wait for old-pool-b deletion, got %d creates", createsBWhileBlocked)
+		}
+
+		close(releaseDelB)
+
+		select {
+		case err := <-syncDone:
+			if err != nil {
+				t.Fatalf("SyncStaticNodePools() unexpected error: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for SyncStaticNodePools to complete")
+		}
+
+		if got := svc.creates["pool-a"]; got != 1 {
+			t.Errorf("expected 1 create for pool-a, got %d", got)
+		}
+		if got := svc.creates["new-pool-b"]; got != 1 {
+			t.Errorf("expected 1 create for new-pool-b, got %d", got)
+		}
+	})
+
+	t.Run("createTimeout starts after blocking deletion completes", func(t *testing.T) {
+		gke, svc := newTestGKE(t)
+		ctx := context.Background()
+
+		seedNodePool(t, gke, svc, "slow-del-np", subblockPath(1))
+
+		createTimeout := 60 * time.Millisecond
+		svc.deleteHook = func(ctx context.Context, name string) error {
+			// Sleep longer than createTimeout during deletion
+			time.Sleep(150 * time.Millisecond)
+			return nil
+		}
+		svc.createHook = func(ctx context.Context, req *container.CreateNodePoolRequest) error {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("create context already expired: %w", err)
+			}
+			return nil
+		}
+
+		toDelete := []StaticNodePoolDelete{
+			{Name: "slow-del-np", SubblockName: subblockPath(1), Reason: "static nodepool in error state"},
+		}
+		toCreate := []*DesiredStaticNodePool{
+			{Name: "slow-del-np", SubblockToConsume: subblockPath(1), Config: staticConfig},
+		}
+
+		if err := gke.SyncStaticNodePools(ctx, toDelete, toCreate, 1, 1, createTimeout, nil); err != nil {
+			t.Fatalf("expected create to succeed with fresh createTimeout after slow delete, got error: %v", err)
+		}
+		if got := svc.creates["slow-del-np"]; got != 1 {
+			t.Errorf("expected 1 create for slow-del-np, got %d", got)
+		}
+	})
+}
