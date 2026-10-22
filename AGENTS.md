@@ -17,7 +17,7 @@ Every pull request, feature, or bug fix must include a corresponding KEP-style n
 1. **Naming**: Zero-padded 4-digit sequential prefix followed by a kebab-case slug (`NNNN-<short-title>.md`).
 2. **Purpose**: Provide a concise, user-facing summary of the change that can be pasted directly into a PR description, capturing the essence of the user prompts cohesively.
 3. **Structure**: Keep it well under one page with two short sections—`## Problem` (why the change is needed and what was broken or limiting before) and `## Solution` (3–5 short bullet points describing how it works now).
-4. **Plain Language**: Use simple, everyday words (for example, "pair" instead of "sequentially chain") and focus on user-visible behavior rather than file-by-file code diffs or internal implementation minutiae.
+4. **Plain Language**: Use simple, everyday words and focus on user-visible behavior rather than file-by-file code diffs or internal implementation minutiae.
 
 ---
 
