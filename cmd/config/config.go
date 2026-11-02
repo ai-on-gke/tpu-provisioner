@@ -24,7 +24,9 @@ import (
 
 type Config struct {
 	// Provider can be "gke" or "mock".
-	Provider string `envconfig:"PROVIDER" default:"gke"`
+	Provider       string `envconfig:"PROVIDER" default:"gke"`
+	GKEEndpoint    string `envconfig:"GKE_ENDPOINT" default:""`
+	GKEDisableAuth bool   `envconfig:"GKE_DISABLE_AUTH" default:"false"`
 
 	GCPProjectID          string `envconfig:"GCP_PROJECT_ID"`
 	GCPClusterLocation    string `envconfig:"GCP_CLUSTER_LOCATION"`

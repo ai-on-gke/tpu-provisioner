@@ -41,6 +41,7 @@ import (
 	jobwebhook "github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner/internal/webhook"
 
 	containerv1beta1 "google.golang.org/api/container/v1beta1"
+	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -217,7 +218,16 @@ func main() {
 			EnableImageStreaming:    cfg.EnableImageStreaming,
 		}
 
-		containers, err := containerv1beta1.NewService(context.Background() /*, option.WithCredentials(creds)*/)
+		var clientOpts []option.ClientOption
+		if cfg.GKEEndpoint != "" {
+			setupLog.Info("overriding GKE API endpoint", "endpoint", cfg.GKEEndpoint)
+			clientOpts = append(clientOpts, option.WithEndpoint(cfg.GKEEndpoint))
+		}
+		if cfg.GKEDisableAuth {
+			setupLog.Info("disabling GKE API authentication")
+			clientOpts = append(clientOpts, option.WithoutAuthentication())
+		}
+		containers, err := containerv1beta1.NewService(context.Background(), clientOpts...)
 		if err != nil {
 			setupLog.Error(err, "unable to create gke client")
 			os.Exit(1)
