@@ -61,8 +61,8 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
-JOBSET_VERSION ?= "v0.11.1"
-LWS_VERSION ?= "v0.8.0"
+JOBSET_VERSION ?= "v0.13.0"
+LWS_VERSION ?= "v1.0.0"
 GINKGO_ARGS ?= --procs=$(shell echo $$(( $$(nproc) / 2 )))
 
 .PHONY: test-unit
