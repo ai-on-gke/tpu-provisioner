@@ -228,7 +228,7 @@ func (g *GKE) DeleteNodePool(name string, eventObj client.Object, why string) er
 	g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolDeletionStarted, "Starting deletion of Node Pool %s because %s", name, why)
 	if err := g.NodePools.Delete(context.TODO(), name, OpCallbacks{
 		NotFound: func() {
-			g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolNotFound, "Node pool not found - ignoring deletion attempt.")
+			g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolNotFound, "Node pool not found - ignoring deletion attempt. NodePool: %s", name)
 		},
 		ReqFailure: func(err error) {
 			g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolDeletionFailed, "Request to delete Node Pool %s failed: %v.", name, err)
