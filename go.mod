@@ -18,7 +18,7 @@ require (
 	k8s.io/klog/v2 v2.140.0
 	sigs.k8s.io/controller-runtime v0.25.2
 	sigs.k8s.io/jobset v0.13.0
-	sigs.k8s.io/lws v1.0.0
+	sigs.k8s.io/lws v0.8.0
 )
 
 require (
