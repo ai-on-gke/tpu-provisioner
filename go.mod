@@ -1,6 +1,6 @@
 module github.com/GoogleCloudPlatform/ai-on-gke/tpu-provisioner
 
-go 1.25.0
+go 1.27.4
 
 require (
 	cloud.google.com/go/compute/metadata v0.9.0
