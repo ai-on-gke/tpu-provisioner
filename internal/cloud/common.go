@@ -52,15 +52,15 @@ type StaticNodePoolLifecycleConfig struct {
 }
 
 type StaticNodePoolConfig struct {
-	MachineType                 string                         `yaml:"machineType"`
-	Accelerator                 string                         `yaml:"accelerator"`
-	Topology                    string                         `yaml:"topology"`
-	NodeCount                   int                            `yaml:"nodeCount"`
-	NodeLabels                  map[string]string              `yaml:"nodeLabels"`
-	ShieldedIntegrityMonitoring *bool                          `yaml:"shieldedIntegrityMonitoring"`
-	ShieldedSecureBoot          *bool                          `yaml:"shieldedSecureBoot"`
-	MaxPodsPerNode              int64                          `yaml:"maxPodsPerNode"`
-	EnableAutoRepair            *bool                          `yaml:"enableAutorepair"`
+	MachineType                 string                        `yaml:"machineType"`
+	Accelerator                 string                        `yaml:"accelerator"`
+	Topology                    string                        `yaml:"topology"`
+	NodeCount                   int                           `yaml:"nodeCount"`
+	NodeLabels                  map[string]string             `yaml:"nodeLabels"`
+	ShieldedIntegrityMonitoring *bool                         `yaml:"shieldedIntegrityMonitoring"`
+	ShieldedSecureBoot          *bool                         `yaml:"shieldedSecureBoot"`
+	MaxPodsPerNode              int64                         `yaml:"maxPodsPerNode"`
+	EnableAutoRepair            *bool                         `yaml:"enableAutorepair"`
 	PlacementPolicy             string                        `yaml:"placementPolicy"`
 	Lifecycle                   StaticNodePoolLifecycleConfig `yaml:"lifecycle"`
 }
@@ -75,6 +75,12 @@ type DesiredStaticNodePool struct {
 	SubblockToConsume string
 }
 
+type StaticNodePoolDelete struct {
+	Name         string
+	SubblockName string
+	Reason       string
+}
+
 type Provider interface {
 	NodePoolLabelKey() string
 	ProjectID() string
@@ -82,8 +88,7 @@ type Provider interface {
 	DeleteNodePoolForNode(*corev1.Node, string) error
 	DeleteNodePool(string, client.Object, string) error
 	ListNodePools() ([]NodePoolRef, error)
-	EnsureStaticNodePools(ctx context.Context, desiredNodePools []*DesiredStaticNodePool, concurrency int, eventObj client.Object) error
-	DeleteStaticNodePools(ctx context.Context, nodepoolNames []string, concurrency int, eventObj client.Object, why string) []error
+	SyncStaticNodePools(ctx context.Context, toDelete []StaticNodePoolDelete, toCreate []*DesiredStaticNodePool, deleteConcurrency int, createConcurrency int, createTimeout time.Duration, eventObj client.Object) error
 	DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepools []*DesiredStaticNodePool) (toCreate []*DesiredStaticNodePool, toDeleteMissing []string, toDeleteUpdate []string, toDeleteError []string, err error)
 }
 

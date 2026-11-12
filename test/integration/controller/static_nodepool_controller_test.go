@@ -2,6 +2,7 @@ package controllertest
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -434,6 +435,117 @@ machineType: "tpu-v4"
 				}
 				return false
 			}, timeout, interval).Should(BeTrue(), "new-pool-0001 should be created after capacity is released")
+		})
+	})
+
+	Context("when a static nodepool deletion fails", func() {
+		It("should still create non-conflicting nodepools while skipping conflicting ones until deletion succeeds", func() {
+			ctx := context.Background()
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      controller.ConfigMapName,
+					Namespace: testNamespace,
+				},
+				Data: map[string]string{
+					"reservations": `
+- name: "res-del-fail"
+  gscBlocks:
+  - name: "block-del-fail"
+    subblocks: "0001"
+    nodepoolPrefix: "del-fail-old"
+`,
+					"nodepoolConfig": `
+machineType: "tpu-v4"
+`,
+				},
+			}
+
+			_ = k8sClient.Delete(ctx, &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      controller.ConfigMapName,
+					Namespace: testNamespace,
+				},
+			})
+
+			By("Creating initial configmap with del-fail-old-0001 on subblock 0001")
+			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+
+			By("Waiting for del-fail-old-0001 creation")
+			Eventually(func() bool {
+				nodePools, err := provider.ListNodePools()
+				if err != nil {
+					return false
+				}
+				for _, np := range nodePools {
+					if np.Name == "del-fail-old-0001" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
+
+			By("Injecting a deletion failure for del-fail-old-0001")
+			provider.setDeleteErrorForPool("del-fail-old-0001", errors.New("simulated delete failure"))
+			defer provider.setDeleteErrorForPool("del-fail-old-0001", nil)
+
+			By("Updating configmap to rename subblock 0001 to del-fail-new-0001 and add subblock 0002 (del-fail-new-0002)")
+			cm.Data["reservations"] = `
+- name: "res-del-fail"
+  gscBlocks:
+  - name: "block-del-fail"
+    subblocks: "0001-0002"
+    nodepoolPrefix: "del-fail-new"
+`
+			Expect(k8sClient.Update(ctx, cm)).To(Succeed())
+
+			By("Verifying non-conflicting del-fail-new-0002 IS created even though del-fail-old-0001 failed to delete")
+			Eventually(func() bool {
+				nodePools, err := provider.ListNodePools()
+				if err != nil {
+					return false
+				}
+				for _, np := range nodePools {
+					if np.Name == "del-fail-new-0002" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue(), "del-fail-new-0002 should be created despite del-fail-old-0001 delete failure")
+
+			By("Verifying conflicting del-fail-new-0001 is NOT created while del-fail-old-0001 still exists")
+			Consistently(func() bool {
+				nodePools, err := provider.ListNodePools()
+				if err != nil {
+					return true
+				}
+				for _, np := range nodePools {
+					if np.Name == "del-fail-new-0001" {
+						return true
+					}
+				}
+				return false
+			}, 2*time.Second, interval).Should(BeFalse(), "del-fail-new-0001 should NOT be created while del-fail-old-0001 fails to delete")
+
+			By("Clearing the deletion error for del-fail-old-0001")
+			provider.setDeleteErrorForPool("del-fail-old-0001", nil)
+
+			By("Verifying del-fail-old-0001 is deleted and del-fail-new-0001 is created on retry")
+			Eventually(func() bool {
+				_, deleted := provider.getDeleted("del-fail-old-0001")
+				if !deleted {
+					return false
+				}
+				nodePools, err := provider.ListNodePools()
+				if err != nil {
+					return false
+				}
+				for _, np := range nodePools {
+					if np.Name == "del-fail-new-0001" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue(), "del-fail-new-0001 should be created once del-fail-old-0001 deletion succeeds")
 		})
 	})
 })

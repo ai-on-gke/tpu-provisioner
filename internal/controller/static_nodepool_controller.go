@@ -123,6 +123,11 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("failed to diff nodepools: %w", err)
 	}
 
+	existingMap := make(map[string]cloud.NodePoolRef, len(existingNodePools))
+	for _, np := range existingNodePools {
+		existingMap[np.Name] = np
+	}
+
 	// Track skipped deletes/recreates when nodepool is in use by a slice
 	var skippedCapacity map[string]bool
 	skippedUpdates := make(map[string]bool)
@@ -141,11 +146,6 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 
 		inUseNodepools := GetInUseNodepools(sliceList.Items, nodeList.Items)
-
-		existingMap := make(map[string]cloud.NodePoolRef)
-		for _, np := range existingNodePools {
-			existingMap[np.Name] = np
-		}
 
 		// Filter out toDelete nodepools that are locked by a Slice.
 		filterLocked := func(pools []string, actionName string, trackSkippedUpdates bool) []string {
@@ -190,36 +190,45 @@ func (r *StaticNodepoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		toCreate = filteredCreate
 	}
 
+	var toDelete []cloud.StaticNodePoolDelete
+	appendDeletes := func(names []string, reason string) {
+		for _, name := range names {
+			var subblock string
+			if np, ok := existingMap[name]; ok {
+				subblock = np.SubblockName
+			}
+			toDelete = append(toDelete, cloud.StaticNodePoolDelete{
+				Name:         name,
+				SubblockName: subblock,
+				Reason:       reason,
+			})
+		}
+	}
+
 	if len(toDeleteMissing) > 0 {
-		lg.Info("Deleting static nodepools not found in config", "nodepools", toDeleteMissing)
-		errs := r.Provider.DeleteStaticNodePools(ctx, toDeleteMissing, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool not in config")
-		if len(errs) > 0 {
-			return ctrl.Result{}, fmt.Errorf("failed to delete some static nodepools: %v", errs)
-		}
+		lg.Info("Scheduling deletion of static nodepools not found in config", "nodepools", toDeleteMissing)
+		appendDeletes(toDeleteMissing, "static nodepool not in config")
 	}
-
 	if len(toDeleteError) > 0 {
-		lg.Info("Deleting static nodepools in ERROR state to retry", "nodepools", toDeleteError)
-		errs := r.Provider.DeleteStaticNodePools(ctx, toDeleteError, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool in error state")
-		if len(errs) > 0 {
-			return ctrl.Result{}, fmt.Errorf("failed to delete some static nodepools: %v", errs)
-		}
+		lg.Info("Scheduling deletion of static nodepools in ERROR state to retry", "nodepools", toDeleteError)
+		appendDeletes(toDeleteError, "static nodepool in error state")
 	}
-
 	if len(toDeleteUpdate) > 0 {
-		lg.Info("Deleting static nodepools to recreate (config changed)", "nodepools", toDeleteUpdate)
-		errs := r.Provider.DeleteStaticNodePools(ctx, toDeleteUpdate, r.StaticNodepoolDeleteConcurrency, &cm, "static nodepool config changed")
-		if len(errs) > 0 {
-			return ctrl.Result{}, fmt.Errorf("failed to delete some static nodepools: %v", errs)
-		}
+		lg.Info("Scheduling deletion of static nodepools to recreate (config changed)", "nodepools", toDeleteUpdate)
+		appendDeletes(toDeleteUpdate, "static nodepool config changed")
 	}
 
-	if len(toCreate) > 0 {
-		lg.Info("Creating static nodepools", "nodepools", toCreate)
-		createCtx, cancel := context.WithTimeout(ctx, r.StaticNodepoolCreateTimeout)
-		defer cancel()
-		if err := r.Provider.EnsureStaticNodePools(createCtx, toCreate, r.StaticNodepoolCreateConcurrency, &cm); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to ensure static nodepools: %w", err)
+	if len(toDelete) > 0 || len(toCreate) > 0 {
+		if err := r.Provider.SyncStaticNodePools(
+			ctx,
+			toDelete,
+			toCreate,
+			r.StaticNodepoolDeleteConcurrency,
+			r.StaticNodepoolCreateConcurrency,
+			r.StaticNodepoolCreateTimeout,
+			&cm,
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to sync static nodepools: %w", err)
 		}
 	}
 
@@ -310,4 +319,3 @@ func parseNodepoolConfig(rawYAML string) (*cloud.StaticNodePoolConfig, error) {
 	}
 	return &nodepoolConfig, nil
 }
-

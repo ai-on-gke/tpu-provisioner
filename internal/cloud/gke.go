@@ -763,67 +763,112 @@ func (g *GKE) DiffStaticNodePools(existingNodepools []NodePoolRef, desiredNodepo
 	return toCreate, toDeleteMissing, toDeleteUpdate, toDeleteError, nil
 }
 
-// EnsureStaticNodePools provisions all the node pools for a given reservation.
-func (g *GKE) EnsureStaticNodePools(ctx context.Context, desiredNodePools []*DesiredStaticNodePool, concurrency int, eventObj client.Object) error {
-	log.Info("Ensuring static nodepools", "count", len(desiredNodePools))
+// SyncStaticNodePools runs static nodepool deletions and creations in parallel.
+// Any creation that targets a reservation subblock currently being deleted is
+// chained to run after that deletion succeeds; if the deletion fails, the
+// dependent creation is skipped.
+func (g *GKE) SyncStaticNodePools(
+	ctx context.Context,
+	toDelete []StaticNodePoolDelete,
+	toCreate []*DesiredStaticNodePool,
+	deleteConcurrency int,
+	createConcurrency int,
+	createTimeout time.Duration,
+	eventObj client.Object,
+) error {
+	lg := logf.FromContext(ctx)
+	lg.Info("Syncing static nodepools", "deleteCount", len(toDelete), "createCount", len(toCreate))
+
+	if deleteConcurrency <= 0 {
+		deleteConcurrency = 1
+	}
+	if createConcurrency <= 0 {
+		createConcurrency = 1
+	}
+
+	deleteSem := make(chan struct{}, deleteConcurrency)
+	createSem := make(chan struct{}, createConcurrency)
+	errs := make(chan error, len(toDelete)+len(toCreate))
+
+	doDelete := func(del StaticNodePoolDelete) error {
+		deleteSem <- struct{}{}
+		defer func() { <-deleteSem }()
+
+		lg.Info("Deleting static nodepool", "nodepool", del.Name, "subblock", del.SubblockName, "reason", del.Reason)
+		if err := g.DeleteNodePool(del.Name, eventObj, del.Reason); err != nil {
+			err = fmt.Errorf("failed to delete nodepool %s: %w", del.Name, err)
+			errs <- err
+			return err
+		}
+		return nil
+	}
+
+	doCreate := func(desired *DesiredStaticNodePool) {
+		createSem <- struct{}{}
+		defer func() { <-createSem }()
+
+		createCtx := ctx
+		if createTimeout > 0 {
+			var cancel context.CancelFunc
+			createCtx, cancel = context.WithTimeout(ctx, createTimeout)
+			defer cancel()
+		}
+
+		if err := g.ensureStaticNodePool(createCtx, desired, eventObj); err != nil {
+			errs <- err
+		}
+	}
+
+	deleteBySubblock := make(map[string]bool, len(toDelete))
+	for _, del := range toDelete {
+		if del.SubblockName != "" {
+			deleteBySubblock[del.SubblockName] = true
+		}
+	}
+
+	createAfterDelete := make(map[string]*DesiredStaticNodePool)
+	var independentCreates []*DesiredStaticNodePool
+	for _, desired := range toCreate {
+		if desired.SubblockToConsume != "" && deleteBySubblock[desired.SubblockToConsume] {
+			createAfterDelete[desired.SubblockToConsume] = desired
+		} else {
+			independentCreates = append(independentCreates, desired)
+		}
+	}
 
 	var wg sync.WaitGroup
-	errs := make(chan error, len(desiredNodePools))
-	sem := make(chan struct{}, concurrency)
 
-	for _, desired := range desiredNodePools {
+	for _, del := range toDelete {
 		wg.Add(1)
-		sem <- struct{}{}
+		nextCreate := createAfterDelete[del.SubblockName]
+		go func(del StaticNodePoolDelete, nextCreate *DesiredStaticNodePool) {
+			defer wg.Done()
+			if err := doDelete(del); err != nil {
+				if nextCreate != nil {
+					lg.Info("Skipping creation of static nodepool because deletion of conflicting nodepool failed",
+						"nodePoolName", nextCreate.Name,
+						"subblock", nextCreate.SubblockToConsume,
+						"conflictingNodePool", del.Name,
+						"deleteErr", err,
+					)
+				}
+				return
+			}
+			if nextCreate != nil {
+				doCreate(nextCreate)
+			}
+		}(del, nextCreate)
+	}
 
+	for _, desired := range independentCreates {
+		wg.Add(1)
 		go func(desired *DesiredStaticNodePool) {
 			defer wg.Done()
-			defer func() { <-sem }()
-
-			np, err := g.StaticNodePoolForSubBlock(desired.Name, desired.SubblockToConsume, desired.Config)
-			if err != nil {
-				errs <- fmt.Errorf("determining node pool for static reservation: %w", err)
-				return
-			}
-			log.Info("Determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
-
-			npExists, err := g.checkNodePoolExists(ctx, np)
-			if err != nil {
-				errs <- fmt.Errorf("checking if node pool exists: %w", err)
-				return
-			}
-			log.Info("Checked whether static node pool already exists",
-				"nodePoolName", np.Name, "existingNodePoolState", npExists,
-			)
-
-			if !npExists {
-				req := &containerv1beta1.CreateNodePoolRequest{
-					NodePool: np,
-					Parent:   g.ClusterContext.ClusterName(),
-				}
-
-				log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
-				g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationStarted, "Starting creation of static Node Pool %s", np.Name)
-				if err := g.NodePools.Create(ctx, req, OpCallbacks{
-					ReqFailure: func(err error) {
-						log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
-						g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Request to create Node Pool %s failed: %v.", np.Name, err)
-					},
-					OpFailure: func(err error) {
-						log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
-						g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Operation to create Node Pool %s failed: %v.", np.Name, err)
-					},
-					Success: func() {
-						log.Info("successfully created static node pool", "nodePoolName", np.Name)
-						g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationSucceeded, "Successfully created Node Pool %s.", np.Name)
-					},
-				}); err != nil {
-					errs <- err
-				}
-			}
+			doCreate(desired)
 		}(desired)
 	}
 
-	log.Info("Waiting for all goroutines to finish ensuring static nodepools.")
+	lg.Info("Waiting for all goroutines to finish syncing static nodepools.")
 	wg.Wait()
 	close(errs)
 
@@ -837,6 +882,55 @@ func (g *GKE) EnsureStaticNodePools(ctx context.Context, desiredNodePools []*Des
 	}
 
 	return nil
+}
+
+func (g *GKE) ensureStaticNodePool(ctx context.Context, desired *DesiredStaticNodePool, eventObj client.Object) error {
+	np, err := g.StaticNodePoolForSubBlock(desired.Name, desired.SubblockToConsume, desired.Config)
+	if err != nil {
+		return fmt.Errorf("determining node pool for static reservation: %w", err)
+	}
+	log.Info("Determined node pool for static reservation", "nodePoolName", np.Name, "nodePool", np)
+
+	npExists, err := g.checkNodePoolExists(ctx, np)
+	if err != nil {
+		return fmt.Errorf("checking if node pool exists: %w", err)
+	}
+	log.Info("Checked whether static node pool already exists",
+		"nodePoolName", np.Name, "existingNodePoolState", npExists,
+	)
+
+	if !npExists {
+		req := &containerv1beta1.CreateNodePoolRequest{
+			NodePool: np,
+			Parent:   g.ClusterContext.ClusterName(),
+		}
+
+		log.Info("statically creating node pool", "nodePoolName", np.Name, "request", req)
+		g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationStarted, "Starting creation of static Node Pool %s", np.Name)
+		if err := g.NodePools.Create(ctx, req, OpCallbacks{
+			ReqFailure: func(err error) {
+				log.Error(err, "request to create static node pool failed", "nodePoolName", np.Name)
+				g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Request to create Node Pool %s failed: %v.", np.Name, err)
+			},
+			OpFailure: func(err error) {
+				log.Error(err, "operation to create static node pool failed", "nodePoolName", np.Name)
+				g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolCreationFailed, "Operation to create Node Pool %s failed: %v.", np.Name, err)
+			},
+			Success: func() {
+				log.Info("successfully created static node pool", "nodePoolName", np.Name)
+				g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolCreationSucceeded, "Successfully created Node Pool %s.", np.Name)
+			},
+		}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// EnsureStaticNodePools provisions all the node pools for a given reservation.
+func (g *GKE) EnsureStaticNodePools(ctx context.Context, desiredNodePools []*DesiredStaticNodePool, concurrency int, eventObj client.Object) error {
+	return g.SyncStaticNodePools(ctx, nil, desiredNodePools, 0, concurrency, 0, eventObj)
 }
 
 // ParseSubBlocks parses a string of the form "startSubBlockIndex-endSubBlockIndex" or "startSubBlockIndex" into integers.
@@ -1072,46 +1166,4 @@ func nodePoolHash(np *containerv1beta1.NodePool) (string, error) {
 	}
 	h.Write(jsn)
 	return rand.SafeEncodeString(fmt.Sprint(h.Sum32())), nil
-}
-
-// DeleteStaticNodePools deletes a list of nodepools concurrently.
-func (g *GKE) DeleteStaticNodePools(ctx context.Context, nodepoolNames []string, concurrency int, eventObj client.Object, why string) []error {
-	lg := logf.FromContext(ctx)
-
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-	if len(nodepoolNames) < concurrency {
-		concurrency = len(nodepoolNames)
-	}
-
-	var wg sync.WaitGroup
-	errs := make(chan error, len(nodepoolNames))
-	sem := make(chan struct{}, concurrency)
-
-	for _, name := range nodepoolNames {
-		wg.Add(1)
-		sem <- struct{}{}
-
-		go func(npName string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			lg.Info("Deleting static nodepool", "nodepool", npName)
-			if err := g.DeleteNodePool(npName, eventObj, why); err != nil {
-				errs <- fmt.Errorf("failed to delete nodepool %s: %w", npName, err)
-			}
-		}(name)
-	}
-
-	lg.Info("Waiting for all goroutines to finish deleting static nodepools.")
-	wg.Wait()
-	close(errs)
-
-	var allErrors []error
-	for err := range errs {
-		allErrors = append(allErrors, err)
-	}
-
-	return allErrors
 }

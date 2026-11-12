@@ -2,6 +2,7 @@ package controllertest
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ type mockProvider struct {
 	created                map[types.NamespacedName]bool
 	deleted                map[string]time.Time
 	staticNodepoolsCreated map[string]cloud.NodePoolRef
+	deleteErrorsByPool     map[string]error
 	ensureCalls            int
 	deleteCalls            int
 	EnsureError            error
@@ -31,6 +33,7 @@ func newMockProvider(gke *cloud.GKE) *mockProvider {
 		created:                make(map[types.NamespacedName]bool),
 		deleted:                make(map[string]time.Time),
 		staticNodepoolsCreated: make(map[string]cloud.NodePoolRef),
+		deleteErrorsByPool:     make(map[string]error),
 	}
 }
 
@@ -69,43 +72,76 @@ func (p *mockProvider) DiffStaticNodePools(existingNodepools []cloud.NodePoolRef
 	return p.gke.DiffStaticNodePools(existingNodepools, desiredNodepools)
 }
 
-func (p *mockProvider) EnsureStaticNodePools(ctx context.Context, desiredNodePools []*cloud.DesiredStaticNodePool, concurrency int, _ client.Object) error {
-	p.Lock()
-	p.ensureCalls++
-	p.Unlock()
+func (p *mockProvider) SyncStaticNodePools(
+	ctx context.Context,
+	toDelete []cloud.StaticNodePoolDelete,
+	toCreate []*cloud.DesiredStaticNodePool,
+	deleteConcurrency int,
+	createConcurrency int,
+	createTimeout time.Duration,
+	eventObj client.Object,
+) error {
+	failedSubblocks := make(map[string]bool)
+	var errs []error
 
-	for _, desired := range desiredNodePools {
-		np, err := p.gke.StaticNodePoolForSubBlock(desired.Name, desired.SubblockToConsume, desired.Config)
-		if err != nil {
-			return err
-		}
-
+	if len(toDelete) > 0 {
 		p.Lock()
-		var subblockName string
-		if len(np.Config.ReservationAffinity.Values) > 0 {
-			// Note: the current implementation of static nodepool provisioning
-			// only supports subblock-level targeting.
-			subblockName = np.Config.ReservationAffinity.Values[0]
-		}
-		p.staticNodepoolsCreated[desired.Name] = cloud.NodePoolRef{
-			Name:         desired.Name,
-			Labels:       np.Config.Labels,
-			SubblockName: subblockName,
-		}
+		p.deleteCalls++
 		p.Unlock()
+
+		for _, del := range toDelete {
+			if err := p.DeleteNodePool(del.Name, eventObj, del.Reason); err != nil {
+				if del.SubblockName != "" {
+					failedSubblocks[del.SubblockName] = true
+				}
+				errs = append(errs, err)
+			}
+		}
 	}
-	return nil
+
+	if len(toCreate) > 0 {
+		p.Lock()
+		p.ensureCalls++
+		p.Unlock()
+
+		for _, desired := range toCreate {
+			if desired.SubblockToConsume != "" && failedSubblocks[desired.SubblockToConsume] {
+				continue
+			}
+
+			np, err := p.gke.StaticNodePoolForSubBlock(desired.Name, desired.SubblockToConsume, desired.Config)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+
+			p.Lock()
+			var subblockName string
+			if len(np.Config.ReservationAffinity.Values) > 0 {
+				// Note: the current implementation of static nodepool provisioning
+				// only supports subblock-level targeting.
+				subblockName = np.Config.ReservationAffinity.Values[0]
+			}
+			p.staticNodepoolsCreated[desired.Name] = cloud.NodePoolRef{
+				Name:         desired.Name,
+				Labels:       np.Config.Labels,
+				SubblockName: subblockName,
+			}
+			p.Unlock()
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
-func (p *mockProvider) DeleteStaticNodePools(ctx context.Context, nodepoolNames []string, concurrency int, eventObj client.Object, why string) []error {
+func (p *mockProvider) setDeleteErrorForPool(name string, err error) {
 	p.Lock()
-	p.deleteCalls++
-	p.Unlock()
-
-	for _, name := range nodepoolNames {
-		p.DeleteNodePool(name, eventObj, why)
+	defer p.Unlock()
+	if err == nil {
+		delete(p.deleteErrorsByPool, name)
+	} else {
+		p.deleteErrorsByPool[name] = err
 	}
-	return nil
 }
 
 func (p *mockProvider) getCreated(nn types.NamespacedName) bool {
@@ -132,6 +168,9 @@ func (p *mockProvider) DeleteNodePool(name string, eventObj client.Object, why s
 	p.Lock()
 	defer p.Unlock()
 	p.deleteCalls++
+	if err, exists := p.deleteErrorsByPool[name]; exists && err != nil {
+		return err
+	}
 	if p.DeleteError != nil {
 		return p.DeleteError
 	}
