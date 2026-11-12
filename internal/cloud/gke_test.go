@@ -1981,4 +1981,3 @@ func TestStaticImageStreamingConfig(t *testing.T) {
 		}
 	})
 }
-

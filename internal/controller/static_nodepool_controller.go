@@ -310,4 +310,3 @@ func parseNodepoolConfig(rawYAML string) (*cloud.StaticNodePoolConfig, error) {
 	}
 	return &nodepoolConfig, nil
 }
-
