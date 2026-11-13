@@ -228,7 +228,7 @@ func (g *GKE) DeleteNodePool(name string, eventObj client.Object, why string) er
 	g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolDeletionStarted, "Starting deletion of Node Pool %s because %s", name, why)
 	if err := g.NodePools.Delete(context.TODO(), name, OpCallbacks{
 		NotFound: func() {
-			g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolNotFound, "Node pool not found - ignoring deletion attempt.", name)
+			g.Recorder.Eventf(eventObj, corev1.EventTypeNormal, EventNodePoolNotFound, "Node pool not found - ignoring deletion attempt. NodePool: %s", name)
 		},
 		ReqFailure: func(err error) {
 			g.Recorder.Eventf(eventObj, corev1.EventTypeWarning, EventNodePoolDeletionFailed, "Request to delete Node Pool %s failed: %v.", name, err)
@@ -246,8 +246,10 @@ func (g *GKE) DeleteNodePool(name string, eventObj client.Object, why string) er
 	return nil
 }
 
-var ErrNodePoolStopping = errors.New("node pool stopping")
-var ErrNodePoolDeletedToBeRecreated = errors.New("node pool deleted to be recreated")
+var (
+	ErrNodePoolStopping             = errors.New("node pool stopping")
+	ErrNodePoolDeletedToBeRecreated = errors.New("node pool deleted to be recreated")
+)
 
 type nodePoolState int
 
@@ -560,7 +562,7 @@ func sumTPURequests(p *corev1.Pod) (int, error) {
 		}
 		v, ok := req.AsInt64()
 		if !ok {
-			return 0, fmt.Errorf(("invalid TPU request: %v"), req.String())
+			return 0, fmt.Errorf("invalid TPU request: %v", req.String())
 		}
 		n += int(v)
 	}
